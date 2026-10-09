@@ -19,6 +19,7 @@ local menuOpen, menuRow, menuPage = false, 1, 1
 
 local default_t = 1 -- Standarddicke fuer duennwandige Profile
 torsion_xi = 1 -- Profilbeiwert fuer offene Duennwandprofile
+rasterPunkte = 1 -- Rasterpunkte: 0 keine, 1 normal (1 px), 2 dick (2 px); Weitere Optionen, Zeile 5
 local zahlenFormat = 3 -- 1: Brueche/Wurzelbrueche, 2: Brueche, 3: Dezimal
 -- Bezug der angezeigten Flaechentraegheitsmomente: "schwerpunkt" (Standard) oder "kos"
 -- (Ursprung des gezeichneten Koordinatensystems). Gilt fuer Ergebnisliste und Einzelwerte-Tabelle.
@@ -132,13 +133,49 @@ local status = "Massiv | Duennwand | Ergebnisse"
 qsMeldung = nil   -- { titel = ..., text = ..., fehler = true/false }
 local function meldung(text, titel, fehler)
     status = text
-    qsMeldung = { text = text, titel = titel or "Hinweis", fehler = fehler and true or false }
+    qsMeldung = { text = text, titel = titel or "Hinweis", fehler = fehler and true or false, scroll = 0, scrollMax = 0 }
+end
+-- Meldungsbox: rot bei Fehlergruenden, gelb bei Hinweisen; Text auf Boxbreite umbrechen. Passt er
+-- nicht auf den Bildschirm, zeigt die Box einen Ausschnitt, den hoch/runter verschiebt (on.arrowKey),
+-- dazu einen Zeilenzaehler und rechts Pfeile, solange oben bzw. unten noch etwas steht.
+function zeichneQsMeldung(gc, w, h)
+    local m = qsMeldung
+    local boxW = math.min(w - 20, 300)
+    gc:setFont("sansserif", "r", 9)
+    local zeilen, zeile = {}, ""
+    for wort in tostring(m.text):gmatch("%S+") do
+        local probe = (zeile == "") and wort or (zeile .. " " .. wort)
+        if zeile ~= "" and gc:getStringWidth(probe) > boxW - 24 then zeilen[#zeilen + 1] = zeile; zeile = wort else zeile = probe end
+    end
+    if zeile ~= "" then zeilen[#zeilen + 1] = zeile end
+    local boxH = math.min(28 + 13 * #zeilen, h - 10)
+    local sichtbar = math.max(1, math.floor((boxH - 28) / 13))
+    m.scrollMax = math.max(0, #zeilen - sichtbar)
+    m.scroll = math.max(0, math.min(m.scroll or 0, m.scrollMax))
+    local boxX, boxY = math.floor((w - boxW) / 2), math.floor((h - boxH) / 2)
+    if m.fehler then gc:setColorRGB(255, 205, 200) else gc:setColorRGB(255, 235, 150) end
+    gc:fillRect(boxX, boxY, boxW, boxH)
+    gc:setColorRGB(0, 0, 0); gc:setPen("thin", "smooth"); gc:drawRect(boxX, boxY, boxW, boxH)
+    gc:setFont("sansserif", "b", 10); gc:drawString(m.titel .. ":", boxX + 8, boxY + 6)
+    gc:setFont("sansserif", "r", 9)
+    for k = 1, math.min(sichtbar, #zeilen - m.scroll) do
+        gc:drawString(zeilen[m.scroll + k], boxX + 8, boxY + 12 + 13 * k)
+    end
+    gc:drawString("[Esc]", boxX + boxW - 34, boxY + 6)
+    if m.scrollMax > 0 then
+        local zaehler = string.format("%d-%d/%d", m.scroll + 1, m.scroll + sichtbar, #zeilen)
+        gc:drawString(zaehler, boxX + boxW - 40 - gc:getStringWidth(zaehler), boxY + 6)
+        local ax = boxX + boxW - 10
+        if m.scroll > 0 then gc:fillPolygon({ ax - 4, boxY + 30, ax + 4, boxY + 30, ax, boxY + 24 }) end
+        if m.scroll < m.scrollMax then gc:fillPolygon({ ax - 4, boxY + boxH - 10, ax + 4, boxY + boxH - 10, ax, boxY + boxH - 4 }) end
+    end
 end
 -- Hinweise, die der Nutzer nicht uebersehen soll (Funktionen weiter unten, nach den Anzeigehilfen)
 local qsHinweis = { dicke_gezeigt = false }
 -- Manuell ueberschriebene Querschnittswerte (Schwerpunktwerte im internen KOS, nil = berechnet).
 -- sig ist die Geometrie-Signatur, zu der sie gehoeren; aendert sich der Querschnitt, fallen sie weg.
-local qsWerte = { A = nil, Iy = nil, Iz = nil, Iyz = nil, sig = nil }
+-- ys, zs: manueller Schwerpunkt relativ zum ersten Punkt der Geometrie (bleibt beim KOS-Verschieben gueltig)
+local qsWerte = { A = nil, Iy = nil, Iz = nil, Iyz = nil, ys = nil, zs = nil, sig = nil }
 local escape_clear_pending = false
 local sigma_input_step = 0
 local sigma_N, sigma_My, sigma_Mz = nil, nil, nil
@@ -150,7 +187,7 @@ local sigma_scroll_y, sigma_table_scroll_y = 0, 0
 local shear_results = nil
 local shear_input_step = 0
 local shear_Qa, shear_Qb = nil, nil
-local shear_N, shear_M = 0, 0
+local shear_M = 0
 local shear_profile_visible = false
 local shear_hover_index = nil
 local shear_view_mode = 0
@@ -203,6 +240,9 @@ local kern_build = nil
 local kern_collect_points
 local find_closed_cells
 local berechneSchubmittelpunkt
+-- Duennwandige Kreise und Boegen (Mittellinie mit Dicke t): Abstand fuer Hover, Punkte zum Zeichnen,
+-- Kreisrohr-Erkennung (Bredt) und Pruefung, ob Boegen an andere Elemente anschliessen
+local duennKurve = {}
 local shear_center_cache = nil   -- Schubmittelpunkt haengt nur von der Geometrie ab
 schub_immer_vertraeglich = false -- nur fuer Tests: q0 immer aus der Vertraeglichkeit (Gegenprobe zur Symmetrie)
 local schub_grund = nil          -- Begruendung, wenn Schub nicht berechnet wird
@@ -258,7 +298,7 @@ end
 local function openShearInput()
     qsMeldung = nil
     shear_input_step, inputText = 1, ""
-    shear_N, shear_M = 0, 0
+    shear_M = 0
     shear_results = nil
     shear_view_mode, shear_selector_open = 0, false
     showResults, showTable, menuOpen = false, false, false
@@ -299,6 +339,14 @@ local function berechneTorsionsResultat(moment)
     if #duenn_elemente == 0 or #massiv_elemente > 0 then
         meldung("Torsion nur fuer rein duennwandige Profile (offen oder einzellig geschlossen); fuer massive Querschnitte keine TM2-Formel.", "Torsion nicht berechnet", true)
         return nil
+    end
+    if not duennKurve.rohr() then
+        for _, elem in ipairs(duenn_elemente) do
+            if elem.type == "duenn_kreis" or (duennKurve.gekruemmt(elem) and duennKurve.verbunden()) then
+                meldung("Torsion mit Kreisen/Boegen nur fuer ein einzelnes Kreisrohr oder freie (offene) Boegen; angeschlossene Boegen koennen eine Zelle schliessen.", "Torsion nicht berechnet", true)
+                return nil
+            end
+        end
     end
     local It_closed, Am, cells, info = find_closed_cells()
     if cells >= 2 then
@@ -357,7 +405,7 @@ local function combinedTauAtSample(sample)
 end
 
 local function displayedMomentDensity(sample)
-    local r = system_results
+    local r = qsWerte.geoSicht(system_results)
     if not r then return 0, 0 end
     local display_u, display_v = coordinatesForDisplay(sample.u - r.ys, sample.v - r.zs)
     local thickness = sample.thickness or default_t
@@ -420,8 +468,8 @@ local function enterShearInput()
     elseif shear_input_step == 2 then
         shear_Qb, inputText = input_to_internal(val, force_unit), ""
         if shear_external_input then
-            shear_input_step = 3
-            status = "N in " .. force_unit .. " eingeben, dann Enter."
+            shear_input_step = 4
+            status = "MT in " .. moment_unit .. " eingeben, dann Enter."
         else
             shear_input_step = 0
             shear_results = berechneSchubspannungsResultate(shear_Qa, shear_Qb)
@@ -429,9 +477,6 @@ local function enterShearInput()
             if shear_results then status = "Schubkräfte ausgewertet. V: Verlauf waehlen."
             else meldung(schub_grund or "Schubspannung nicht berechenbar.", "Schub nicht berechnet", true) end
         end
-    elseif shear_input_step == 3 then
-        shear_N, shear_input_step, inputText = input_to_internal(val, force_unit), 4, ""
-        status = "MT in " .. moment_unit .. " eingeben, dann Enter."
     else
         shear_M, shear_input_step, inputText = input_to_internal(val, moment_unit), 0, ""
         shear_results = berechneSchubspannungsResultate(shear_Qa or 0, shear_Qb or 0)
@@ -546,6 +591,24 @@ local function alphaForDisplay(alpha)
         if alpha <= -math.pi / 2 then alpha = alpha + math.pi end
     end
     return alpha
+end
+
+-- Hauptachsensystem (HAS) wie in der σx-Tabelle: Ursprung im Schwerpunkt, η (Hauptachse 1) unter
+-- φ* zur angezeigten y-Achse, ζ (Hauptachse 2) um 90° weiter. Gebraucht fuer die gezeichneten
+-- Hauptachsen und die Beschriftung der Kernflaeche, damit Pfeile und Vorzeichen zusammenpassen.
+kernHAS = {}
+function kernHAS.richtungen()   -- Einheitsvektoren von η und ζ in internen Koordinaten (u, v)
+    local phi = alphaForDisplay(system_results.alpha or 0)
+    local c, sn = math.cos(phi), math.sin(phi)
+    local e1u, e1v = coordinatesFromDisplay(c, sn)
+    local e2u, e2v = coordinatesFromDisplay(-sn, c)
+    return e1u, e1v, e2u, e2v
+end
+function kernHAS.koordinaten(u, v)   -- interner Punkt -> (η, ζ) vom Schwerpunkt aus
+    local r = system_results
+    local e1u, e1v, e2u, e2v = kernHAS.richtungen()
+    local du, dv = u - r.ys, v - r.zs
+    return du * e1u + dv * e1v, du * e2u + dv * e2v
 end
 
 local function forceComponentsForDisplay(fu, fv)
@@ -863,9 +926,95 @@ local function duennSymmetrie(nodes, edges, ys, zs)
     return sym_v, sym_h
 end
 
+function duennKurve.gekruemmt(elem)
+    return elem.type == "duenn_kreis" or elem.type == "duenn_kreis_bogen"
+end
+
+-- Mittelpunkt, Radius, Startwinkel und Oeffnungswinkel (Bogen gegen den Uhrzeigersinn von P2 nach P3)
+function duennKurve.kreis(elem)
+    local C, P = elem.points[1], elem.points[2]
+    local R = math.sqrt((P.u - C.u)^2 + (P.v - C.v)^2)
+    if elem.type == "duenn_kreis" then return C, R, 0, 2 * math.pi end
+    local a1 = math.atan2(P.v - C.v, P.u - C.u)
+    local diff = math.atan2(elem.points[3].v - C.v, elem.points[3].u - C.u) - a1
+    if diff <= 0 then diff = diff + 2 * math.pi end
+    return C, R, a1, diff
+end
+
+-- Abstand eines Punktes von der Mittellinie (Hover, Anschlusspruefung)
+function duennKurve.abstand(elem, u, v)
+    local p = elem.points
+    if not duennKurve.gekruemmt(elem) then return point_to_line_dist(u, v, p[1].u, p[1].v, p[2].u, p[2].v) end
+    local C, R, a1, diff = duennKurve.kreis(elem)
+    local du, dv = u - C.u, v - C.v
+    local d = math.sqrt(du^2 + dv^2)
+    if elem.type == "duenn_kreis" or (math.atan2(dv, du) - a1) % (2 * math.pi) <= diff then return math.abs(d - R) end
+    local best = math.huge
+    for _, a in ipairs({a1, a1 + diff}) do
+        best = math.min(best, math.sqrt((u - C.u - R * math.cos(a))^2 + (v - C.v - R * math.sin(a))^2))
+    end
+    return best
+end
+
+-- Punkte entlang der Mittellinie (Gerade: beide Enden, Kreis/Bogen: alle 5 Grad)
+function duennKurve.punkte(elem)
+    if not duennKurve.gekruemmt(elem) then return {elem.points[1], elem.points[2]} end
+    local C, R, a1, diff = duennKurve.kreis(elem)
+    local steps = math.max(8, math.ceil(math.deg(diff) / 5))
+    local out = {}
+    for i = 0, steps do
+        local a = a1 + diff * i / steps
+        out[#out + 1] = {u = C.u + R * math.cos(a), v = C.v + R * math.sin(a)}
+    end
+    return out
+end
+
+-- Kreisrohr: genau ein duennwandiger Vollkreis und sonst kein duennwandiges Element
+function duennKurve.rohr()
+    if #duenn_elemente ~= 1 or duenn_elemente[1].type ~= "duenn_kreis" then return nil end
+    local C, R = duennKurve.kreis(duenn_elemente[1])
+    return C, R, duenn_elemente[1].t or default_t
+end
+
+-- true, wenn Kreise/Boegen mit anderen duennwandigen Elementen zusammenhaengen (koennte eine Zelle
+-- schliessen, die der Profilgraph -- nur gerade Elemente -- nicht sieht)
+function duennKurve.verbunden()
+    local skala = 1
+    for _, e in ipairs(duenn_elemente) do
+        for _, pt in ipairs(e.points) do skala = math.max(skala, math.abs(pt.u), math.abs(pt.v)) end
+    end
+    local tol = 1e-6 * skala
+    local function enden(e)
+        if not duennKurve.gekruemmt(e) then return {e.points[1], e.points[2]} end
+        if e.type == "duenn_kreis" then return {} end
+        local pts = duennKurve.punkte(e)
+        return {pts[1], pts[#pts]}
+    end
+    for i, e in ipairs(duenn_elemente) do
+        if duennKurve.gekruemmt(e) then
+            for j, f in ipairs(duenn_elemente) do
+                if i ~= j then
+                    for _, pt in ipairs(enden(e)) do if duennKurve.abstand(f, pt.u, pt.v) <= tol then return true end end
+                    for _, pt in ipairs(enden(f)) do if duennKurve.abstand(e, pt.u, pt.v) <= tol then return true end end
+                    if e.type == "duenn_kreis" then return true end   -- Vollkreis neben weiteren Elementen
+                end
+            end
+        end
+    end
+    return false
+end
+
 -- Bredt fuer genau eine geschlossene Zelle. Rueckgabe: I_T, A_m, Zellenzahl, Info (t_min, ...)
 -- Mehrzellige Profile sind statisch unbestimmt und werden nicht berechnet (I_T = 0, A_m = 0).
+-- Ein duennwandiges Kreisrohr ist die Zelle mit A_m = pi R^2 und Int ds/t = 2 pi R / t.
 find_closed_cells = function()
+    local C, R, t = duennKurve.rohr()
+    if C then
+        local Am, sum_ds_t = math.pi * R^2, 2 * math.pi * R / t
+        local info = {cells = 1, Am = Am, It = 4 * Am^2 / sum_ds_t, sum_ds_t = sum_ds_t, t_min = t,
+                      ccw_dir = {}, in_loop = {}, rohr = true}
+        return info.It, Am, 1, info
+    end
     local nodes, edges = duennGraph()
     local info = duennZellen(nodes, edges)
     if info.cells == 1 then return info.It, info.Am, 1, info end
@@ -1224,7 +1373,29 @@ function qsHinweis.pruefeDicke()
 end
 
 function qsWerte.aktiv()
-    return qsWerte.A ~= nil or qsWerte.Iy ~= nil or qsWerte.Iz ~= nil or qsWerte.Iyz ~= nil
+    return qsWerte.A ~= nil or qsWerte.Iy ~= nil or qsWerte.Iz ~= nil or qsWerte.Iyz ~= nil or qsWerte.ys ~= nil
+end
+
+-- Bezugspunkt fuer den manuellen Schwerpunkt: erster Punkt der Geometrie (wie in der Signatur)
+function qsWerte.bezugspunkt()
+    for _, liste in ipairs({ massiv_elemente, duenn_elemente }) do
+        for _, e in ipairs(liste) do
+            if e.points and e.points[1] then return e.points[1].u, e.points[1].v end
+        end
+    end
+    return 0, 0
+end
+
+-- Sicht auf system_results mit dem Schwerpunkt der Geometrie. Schub, Schubmittelpunkt, Verwoelbung
+-- und die Einzelwerte-Tabelle rechnen mit den gezeichneten Waenden und brauchen deren eigenen
+-- Schwerpunkt (sonst ist das statische Moment der ganzen Flaeche nicht null).
+function qsWerte.geoSicht(r)
+    if not r or not r.geo or r.geo.ys == nil then return r end
+    return setmetatable({ ys = r.geo.ys, zs = r.geo.zs }, { __index = r })
+end
+
+local function loescheManuelleWerte()
+    qsWerte.A, qsWerte.Iy, qsWerte.Iz, qsWerte.Iyz, qsWerte.ys, qsWerte.zs = nil, nil, nil, nil, nil, nil
 end
 
 -- Signatur des Querschnitts: Elementtypen, Dicken, Loch-/Numerikmarken und alle Punkte relativ zum
@@ -1251,7 +1422,7 @@ end
 function qsWerte.pruefe()
     local sig = qsWerte.signatur()
     if qsWerte.aktiv() and qsWerte.sig ~= sig then
-        qsWerte.A, qsWerte.Iy, qsWerte.Iz, qsWerte.Iyz = nil, nil, nil, nil
+        loescheManuelleWerte()
         qsWerte.verworfen = true
     end
     qsWerte.sig = sig
@@ -1261,8 +1432,18 @@ end
 function qsWerte.anwenden()
     local r = system_results
     if not r then return end
-    r.geo = { A = r.A, Iy = r.Iy, Iz = r.Iz, Iyz = r.Iyz }
+    r.geo = { A = r.A, Iy = r.Iy, Iz = r.Iz, Iyz = r.Iyz, ys = r.ys, zs = r.zs }
     if qsWerte.aktiv() then
+        if qsWerte.ys then
+            -- manueller Schwerpunkt: Randabstaende fuer die Widerstandsmomente neu
+            local u0, v0 = qsWerte.bezugspunkt()
+            r.ys, r.zs = u0 + qsWerte.ys, v0 + qsWerte.zs
+            local bb = r.bbox
+            if bb then
+                r.e_u = math.max(math.abs(bb.max_u - r.ys), math.abs(bb.min_u - r.ys))
+                r.e_v = math.max(math.abs(bb.max_v - r.zs), math.abs(bb.min_v - r.zs))
+            end
+        end
         r.A = qsWerte.A or r.A
         r.Iy = qsWerte.Iy or r.Iy
         r.Iz = qsWerte.Iz or r.Iz
@@ -1288,14 +1469,15 @@ function qsWerte.anzeige()
     -- ausdruecklich mit if: "tausch and qsWerte.Iz or qsWerte.Iy" liefert Iy, wenn Iz nil ist
     local fa, fb
     if rotation == 90 or rotation == 270 then fa, fb = qsWerte.Iz, qsWerte.Iy else fa, fb = qsWerte.Iy, qsWerte.Iz end
-    return qsWerte.A ~= nil, fa ~= nil, fb ~= nil, qsWerte.Iyz ~= nil
+    return qsWerte.A ~= nil, fa ~= nil, fb ~= nil, qsWerte.Iyz ~= nil, qsWerte.ys ~= nil
 end
 
 -- Liste der manuellen Groessen fuer Hinweise, z. B. "A, I_y"
 function qsWerte.namen()
     local a, b = axes()
-    local fA, fa, fb, fab = qsWerte.anzeige()
+    local fA, fa, fb, fab, fS = qsWerte.anzeige()
     local l = {}
+    if fS then l[#l + 1] = a .. "_S, " .. b .. "_S" end
     if fA then l[#l + 1] = "A" end
     if fa then l[#l + 1] = "I_" .. a end
     if fb then l[#l + 1] = "I_" .. b end
@@ -1306,7 +1488,7 @@ end
 function loescheAllesQS()
     qsLoeschFrage = false
     qsHinweis.dicke_gezeigt = false
-    qsWerte.A, qsWerte.Iy, qsWerte.Iz, qsWerte.Iyz, qsWerte.verworfen = nil, nil, nil, nil, false
+    loescheManuelleWerte(); qsWerte.verworfen = false
     escape_clear_pending = false
     massiv_elemente, duenn_elemente, kraefte, pending = {}, {}, {}, {}
     overlap_pending_elem = nil
@@ -1479,7 +1661,8 @@ local function berechneSystem()
         Wu = Wu, Wv = Wv,
         I1 = I1, I2 = I2, alpha = alpha_star,
         It = It_open, It_closed = It_closed, Am = Am,
-        e_u = e_u, e_v = e_v
+        e_u = e_u, e_v = e_v,
+        bbox = { min_u = sys_min_u, max_u = sys_max_u, min_v = sys_min_v, max_v = sys_max_v }
     }
     qsWerte.anwenden()
     -- Spiegelsymmetrie der Mittellinien (entscheidet, ob der Schubfluss einer geschlossenen
@@ -1563,7 +1746,7 @@ end
 -- Qa, Qb: Querkraefte im internen KOS (u, v). Rueckgabe: maximum, samples, paths, fehler, info
 local function berechneDuenneSchubspannung(Qa, Qb)
     if not system_results or #duenn_elemente == 0 then return nil end
-    local r = system_results
+    local r = qsWerte.geoSicht(system_results)   -- Schub: Schwerpunkt der gezeichneten Waende
     local samples, paths = {}, {}
     local nodes, edges, nicht_gerade = duennGraph(r.ys, r.zs)
     if nicht_gerade then return nil, nil, nil, "Schub nur fuer gerade duennwandige Elemente." end
@@ -1871,7 +2054,13 @@ end
 berechneSchubmittelpunkt = function()
     if shear_center_cache then return shear_center_cache end
     if not system_results or #duenn_elemente == 0 then return nil end
-    local r = system_results
+    local r = qsWerte.geoSicht(system_results)
+    local rohr_mitte = duennKurve.rohr()
+    if rohr_mitte then
+        shear_center_cache = {u = rohr_mitte.u, v = rohr_mitte.v, known_u = true, known_v = true, known = true,
+                              closed = true, moment_a = 0, moment_b = 0}
+        return shear_center_cache
+    end
     local function shear_torque(Qa, Qb)
         local maximum, samples = berechneDuenneSchubspannung(Qa, Qb)
         if not maximum then return nil end
@@ -1931,7 +2120,7 @@ local function berechneSchubMomentTabelle()
                 local signed_force = result[sample.segment .. "_signed"] or 0
                 result[sample.segment .. "_signed"] = signed_force + force
                 local sample_u, sample_v = displayedVector(sample.u, sample.v)
-                local center_u, center_v = displayedVector(system_results.ys, system_results.zs)
+                local center_u, center_v = displayedVector(qsWerte.geoSicht(system_results).ys, qsWerte.geoSicht(system_results).zs)
                 local tangent_u, tangent_v = displayedVector(sample.tangent_u, sample.tangent_v)
                 moments[sample.segment] = moments[sample.segment]
                     - ((sample_u - center_u) * tangent_v - (sample_v - center_v) * tangent_u) * force
@@ -2084,7 +2273,7 @@ function woelb.berechne(M, G)
         return nil, "Verwoelbung nur fuer rein duennwandige Profile (offen oder einzellig geschlossen)."
     end
     if not G or G <= 0 then return nil, "Der Schubmodul G muss positiv sein." end
-    local r = system_results
+    local r = qsWerte.geoSicht(system_results)
     local nodes, edges, nicht_gerade = duennGraph(r.ys, r.zs)
     if nicht_gerade then return nil, "Verwoelbung nur fuer gerade duennwandige Elemente." end
     if #edges == 0 then return nil, "Kein Profilgraph vorhanden." end
@@ -2256,7 +2445,7 @@ end
 berechneSchubspannungsResultate = function(input_Qa, input_Qb)
     schub_grund = nil
     if not system_results then return nil end
-    local r = system_results
+    local r = qsWerte.geoSicht(system_results)
     local a, b = axes()
     local function ablehnen(text)
         schub_grund, status = text, text
@@ -2405,6 +2594,16 @@ local function finish_shape(type_name)
         platform.window:invalidate()
         return
     end
+    if type_name == "duenn_kreis" or type_name == "duenn_kreis_bogen" then
+        -- duennwandig: Mittellinie mit Standarddicke, wie beim Linienzug (keine Loch-/Ueberlappungspruefung)
+        table.insert(duenn_elemente, {type = type_name, points = pending, t = default_t})
+        pending = {}
+        mode = "idle"
+        status = "Duennwandiges Element erstellt."
+        berechneSystem()
+        platform.window:invalidate()
+        return
+    end
     local elem = {type = type_name, points = pending, is_hole = false, is_numeric = false}
     if type_name == "massiv_linie" then
         elem.t = default_t
@@ -2479,13 +2678,11 @@ local function drawAxes(gc)
         gc:drawLine(sx-5, sy, sx+5, sy)
         gc:drawLine(sx, sy-5, sx, sy+5)
         
-        -- Draw Hauptachsen
+        -- Hauptachsen 1 (η) und 2 (ζ) in den Richtungen des HAS (σx-Tabelle, Kernflaeche)
         local HA_len = 1.0 * scale
-        local a_rad = system_results.alpha
-        local hx1 = sx + HA_len * math.cos(a_rad)
-        local hy1 = sy - HA_len * math.sin(a_rad) -- negative for screen Y
-        local hx2 = sx + HA_len * math.cos(a_rad + math.pi/2)
-        local hy2 = sy - HA_len * math.sin(a_rad + math.pi/2)
+        local e1u, e1v, e2u, e2v = kernHAS.richtungen()
+        local hx1, hy1 = sx + HA_len * e1u, sy - HA_len * e1v   -- Bildschirm-y nach unten
+        local hx2, hy2 = sx + HA_len * e2u, sy - HA_len * e2v
         
         gc:setColorRGB(200, 50, 255)
         gc:setPen("thin", "dashed")
@@ -2498,12 +2695,14 @@ local function drawAxes(gc)
 end
 
 local function drawGrid(gc, w, h)
+    if rasterPunkte == 0 then return end
+    local d = (rasterPunkte == 2) and 2 or 1
     gc:setColorRGB(180, 180, 180)
     for i = -30, 30 do
         for j = -24, 24 do
             local x, y = toScreen(i * raster, j * raster)
             if x >= 0 and x <= w and y >= 0 and y <= h then
-                gc:fillRect(x, y, 1, 1)
+                gc:fillRect(x, y, d, d)
             end
         end
     end
@@ -2655,12 +2854,12 @@ local function drawSpreadsheet(gc, w, h)
         local bezug_kurz = bezug_kos and " (KOS)" or ",S"
         local W_a, W_b = r.Wu, r.Wv
         if rotation == 90 or rotation == 270 then W_a, W_b = r.Wv, r.Wu end
-        local mA, ma, mb, mab = qsWerte.anzeige()
+        local mA, ma, mb, mab, mS = qsWerte.anzeige()
         local function mk(f) return f and "  (manuell)" or "" end
         local lines = {
             string.format("A = %.4g [%s]", display_area(r.A), unit_label(2)) .. mk(mA),
-            string.format("%s_s = %.4g [%s]", a, display_length(display_ys), unit_label(1)),
-            string.format("%s_s = %.4g [%s]", b, display_length(display_zs), unit_label(1)),
+            string.format("%s_s = %.4g [%s]", a, display_length(display_ys), unit_label(1)) .. mk(mS),
+            string.format("%s_s = %.4g [%s]", b, display_length(display_zs), unit_label(1)) .. mk(mS),
             string.format("I_%s%s = %.4g [%s]", a, bezug_kurz, display_inertia(iy_anz), unit_label(4)) .. mk(ma),
             string.format("I_%s%s = %.4g [%s]", b, bezug_kurz, display_inertia(iz_anz), unit_label(4)) .. mk(mb),
             string.format("I_%s%s%s = %.4g [%s]", a, b, bezug_kurz, display_inertia(iyz_anz), unit_label(4)) .. mk(mab),
@@ -2836,7 +3035,7 @@ local function drawShearInput(gc, w, h)
     local a, b = axes()
     local field_left, field_width = left + 72, width - 84
     gc:setColorRGB(248, 248, 248)
-    local input_height = shear_external_input and 180 or 112
+    local input_height = shear_external_input and 146 or 112
     gc:fillRect(left, top, width, input_height)
     gc:setColorRGB(0, 0, 0)
     gc:drawRect(left, top, width, input_height)
@@ -2850,15 +3049,12 @@ local function drawShearInput(gc, w, h)
     gc:drawString(shear_input_step == 1 and inputText .. "_" or string.format("%.6g", shear_Qa or 0), field_left + 5, top + 33)
     gc:drawString(shear_input_step == 2 and inputText .. "_" or string.format("%.6g", shear_Qb or 0), field_left + 5, top + 67)
     if shear_external_input then
-        gc:drawString("N [" .. force_unit .. "]", left + 8, top + 104)
-        gc:drawString("MT [" .. moment_unit .. "]", left + 8, top + 138)
+        gc:drawString("MT [" .. moment_unit .. "]", left + 8, top + 104)
         gc:drawRect(field_left, top + 96, field_width, 20)
-        gc:drawRect(field_left, top + 130, field_width, 20)
-        gc:drawString(shear_input_step == 3 and inputText .. "_" or string.format("%.6g", shear_N or 0), field_left + 5, top + 101)
-        gc:drawString(shear_input_step == 4 and inputText .. "_" or string.format("%.6g", shear_M or 0), field_left + 5, top + 135)
+        gc:drawString(shear_input_step == 4 and inputText .. "_" or string.format("%.6g", shear_M or 0), field_left + 5, top + 101)
     end
     gc:setFont("sansserif", "r", 8)
-    gc:drawString("Enter bestaetigen, Esc abbrechen", left + 8, top + (shear_external_input and 168 or 94))
+    gc:drawString("Enter bestaetigen, Esc abbrechen", left + 8, top + (shear_external_input and 128 or 94))
 end
 
 local function drawTorsionInput(gc, w, h)
@@ -3282,7 +3478,6 @@ local function drawSigmaResultsTable(gc, w, h)
         {"N aus Kraeften [" .. force_unit .. "]", string.format("%.6g %s", display_force(sigma_results.force_N or 0), force_unit)},
         {"M" .. moment_a .. " [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(My_d), moment_unit)},
         {"M" .. moment_a .. " aus Normalkraeften [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(fMy_d), moment_unit)},
-        {"M" .. moment_a .. " umgerechnet [Nmm]", string.format("%.6g Nmm", My_d)},
         {"M" .. moment_b .. " [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(Mz_d), moment_unit)},
         {"M" .. moment_b .. " aus Normalkraeften [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(fMz_d), moment_unit)},
         {"A [" .. unit_label(2) .. "]", string.format("%.6g %s", display_area(sigma_results.A), unit_label(2))},
@@ -3298,9 +3493,9 @@ local function drawSigmaResultsTable(gc, w, h)
     if sigma_results.mit_querkraft or (sigma_results.versatz or 0) > 0 then
         -- Querkraftanteil: My = -Δx Fz, Mz = Δx Fy, nach den Normalkraftzeilen eingefuegt
         local achse = sigmaEingabe.stabachse()
-        table.insert(rows, 8, {"Δ" .. achse .. " Kraftebene [" .. unit_label(1) .. "]", string.format("%.6g %s", display_length(sigma_results.versatz or 0), length_unit)})
-        table.insert(rows, 9, {"M" .. moment_a .. " aus Querkraeften [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(qMy_d), moment_unit)})
-        table.insert(rows, 10, {"M" .. moment_b .. " aus Querkraeften [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(qMz_d), moment_unit)})
+        table.insert(rows, 7, {"Δ" .. achse .. " Kraftebene [" .. unit_label(1) .. "]", string.format("%.6g %s", display_length(sigma_results.versatz or 0), length_unit)})
+        table.insert(rows, 8, {"M" .. moment_a .. " aus Querkraeften [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(qMy_d), moment_unit)})
+        table.insert(rows, 9, {"M" .. moment_b .. " aus Querkraeften [" .. moment_unit .. "]", string.format("%.6g %s", display_moment(qMz_d), moment_unit)})
     end
     for _, zeile in ipairs(sigmaEingabe.zusatzzeilen(sigma_results)) do rows[#rows + 1] = zeile end
     if qsWerte.aktiv() then table.insert(rows, 1, { kopf = "Manuelle Werte: " .. qsWerte.namen() }) end
@@ -3655,7 +3850,8 @@ local function drawSigmaOverlay(gc, w, h)
         end
     end
     for _, elem in ipairs(duenn_elemente) do
-        line(elem.points[1].u, elem.points[1].v, elem.points[2].u, elem.points[2].v)
+        local pts = duennKurve.punkte(elem)
+        for k = 1, #pts - 1 do line(pts[k].u, pts[k].v, pts[k + 1].u, pts[k + 1].v) end
     end
 
     local neutral_norm = math.sqrt(slope_u^2 + slope_v^2)
@@ -3742,7 +3938,7 @@ end
 
 local function buildMenuItems()
     if menuPage == 1 then
-        return {"1. Rechteck (2 Klicks)", "2. Kreis (2 Klicks)", "3. Dreieck (3 Klicks)", "4. Trapez/Polygon (n Klicks)", "5. Kreisausschnitt (3 Klicks)", "6. Kreisabschnitt (3 Klicks)", "7. Dicke Linie (2 Klicks)", "8. Kraft platzieren (1 Klick)", "9. Naechste Seite >"}
+        return {"1. Rechteck (2 Klicks)", "2. Kreis (2 Klicks)", "3. Dreieck (3 Klicks)", "4. Viereck/Trapez (4 Klicks)", "5. Kreisausschnitt (3 Klicks)", "6. Kreisabschnitt (3 Klicks)", "7. Dicke Linie (2 Klicks)", "8. Kraft platzieren (1 Klick)", "9. Naechste Seite >"}
     elseif menuPage == 2 then
         return {"1. Linienzug (n Klicks)", "2. Kreis (2 Klicks)", "3. Kreisbogen (3 Klicks)", "4. Kraft platzieren (1 Klick)", "5. < Vorherige Seite"}
     elseif menuPage == 4 then
@@ -3752,9 +3948,12 @@ local function buildMenuItems()
     elseif menuPage == 10 then
         local a, b = axes()
         local r = system_results
-        local fA, fa, fb, fab = qsWerte.anzeige()
-        local tA, ta, tb, tab = "-", "-", "-", "-"
+        local fA, fa, fb, fab, fS = qsWerte.anzeige()
+        local tA, ta, tb, tab, tys, tzs = "-", "-", "-", "-", "-", "-"
         if r then
+            local ys_d, zs_d = coordinatesForDisplay(r.ys, r.zs)
+            tys = string.format("%.6g %s", display_length(ys_d), length_unit)
+            tzs = string.format("%.6g %s", display_length(zs_d), length_unit)
             local Ia, Ib, Iab = inertiaForDisplay(r.Iy, r.Iz, r.Iyz)
             tA = string.format("%.6g %s", display_area(r.A), unit_label(2))
             ta = string.format("%.6g %s", display_inertia(Ia), unit_label(4))
@@ -3766,26 +3965,24 @@ local function buildMenuItems()
                 "2. I_" .. a .. ",S setzen (Aktuell: " .. ta .. m(fa) .. ")",
                 "3. I_" .. b .. ",S setzen (Aktuell: " .. tb .. m(fb) .. ")",
                 "4. I_" .. a .. b .. ",S setzen (Aktuell: " .. tab .. m(fab) .. ")",
-                "5. Berechnete Werte wiederherstellen",
-                "6. < Zurueck"}
+                "5. " .. a .. "_S setzen (Aktuell: " .. tys .. m(fS) .. ")",
+                "6. " .. b .. "_S setzen (Aktuell: " .. tzs .. m(fS) .. ")",
+                "7. Berechnete Werte wiederherstellen",
+                "8. < Zurueck"}
     elseif menuPage == 9 then
         local a, b = axes()
         return {"1. KOS in Schwerpunkt verschieben",
                 "2. KOS entlang " .. a .. " verschieben (Δ" .. a .. " in " .. length_unit .. ": Eingabe)",
                 "3. KOS entlang " .. b .. " verschieben (Δ" .. b .. " in " .. length_unit .. ": Eingabe)",
                 "4. FTM-Bezug (" .. (ftm_bezug == "kos" and "KOS-Ursprung" or "Schwerpunkt") .. ")",
-                "5. < Zurueck"}
+                "5. Rasterpunkte (" .. ((rasterPunkte == 0) and "Keine" or ((rasterPunkte == 2) and "Dick" or "Normal")) .. ")",
+                "6. < Zurueck"}
     elseif menuPage == 5 then
         return {"1. Querschnittswerte", "2. Einzelwerte-Tabelle", "3. σx-Berechnung", "4. Kernflaeche", "5. Schubspannung", "6. Schubmittelpunkt", "7. Verwölbung", "8. Schliessen"}
     elseif menuPage == 8 then
         return {"1. Äussere Belastungen hinzufügen", "2. Schliessen"}
     elseif menuPage == 6 then
         return {"1. Umhuellende Geraden", "2. Kernflaeche", "3. Ausblenden", "4. Zurueck"}
-    elseif menuPage == 7 then
-        if #kraefte > 0 then
-            return {"1. σx aus Kraeften", "2. Normalspannung (N, My)", "3. Schiefe Spannung (N, My, Mz)", "4. Zurueck"}
-        end
-        return {"1. Normalspannung (N, My)", "2. Schiefe Spannung (N, My, Mz)", "3. Zurueck"}
     end
 
     local elem = selected_type == "massiv" and massiv_elemente[selected_idx] or selected_type == "duenn" and duenn_elemente[selected_idx] or kraefte[selected_idx]
@@ -3827,7 +4024,7 @@ local function drawMenu(gc, w, h)
     gc:setColorRGB(248, 248, 248); gc:fillRect(left, 5, width, h - 10)
     gc:setColorRGB(0, 0, 0); gc:drawRect(left, 5, width, h - 10)
     gc:setFont("sansserif", "b", 9)
-    local title = "Menue (" .. (menuPage == 1 and "Massiv" or menuPage == 2 and "Duennwand" or menuPage == 3 and "Editieren" or menuPage == 5 and "Berechnungen" or menuPage == 6 and "Kernflaeche" or menuPage == 7 and "σx" or menuPage == 8 and "Schubspannung" or menuPage == 9 and "Weitere Optionen" or menuPage == 10 and "Querschnittswerte" or "Optionen") .. ")"
+    local title = "Menue (" .. (menuPage == 1 and "Massiv" or menuPage == 2 and "Duennwand" or menuPage == 3 and "Editieren" or menuPage == 5 and "Berechnungen" or menuPage == 6 and "Kernflaeche" or menuPage == 8 and "Schubspannung" or menuPage == 9 and "Weitere Optionen" or menuPage == 10 and "Querschnittswerte" or "Optionen") .. ")"
     gc:drawString(title, left + 5, 10)
     gc:setFont("sansserif", "r", 9)
     for i, row in ipairs(buildMenuItems()) do
@@ -3945,7 +4142,10 @@ local function drawTable(gc, w, h)
         local y, z = coordinatesForDisplay(elem.ys or 0, elem.zs or 0)
         local Iy, Iz, Iyz = inertiaForDisplay(elem.Iy or 0, elem.Iz or 0, elem.Iyz or 0)
         local centroid_y, centroid_z = 0, 0
-        if system_results then centroid_y, centroid_z = coordinatesForDisplay(system_results.ys, system_results.zs) end
+        if system_results then
+            local g = qsWerte.geoSicht(system_results)
+            centroid_y, centroid_z = coordinatesForDisplay(g.ys, g.zs)
+        end
         local delta_y, delta_z = y, z
         if not bezug_kos then delta_y, delta_z = y - centroid_y, z - centroid_z end
         
@@ -4189,29 +4389,6 @@ local function finishSigmaCalculation(Mz_Nmm)
     return sigma_results ~= nil
 end
 
-local function openSigmaFromForces()
-    sigma_N, sigma_My, sigma_Mz = 0, 0, 0
-    sigma_oblique = true
-    sigma_input_step, inputText = 0, ""
-    sigma_results, sigma_scroll_y, sigma_table_scroll_y = nil, 0, 0
-    sigmaEingabe.versatz = 0
-    if sigmaEingabe.hatQuerkraefte() then
-        -- Querkraefte wirken erst mit ihrem Abstand zum Schnitt: nur diesen abfragen
-        qsMeldung = nil
-        sigmaEingabe.felder = { "x" }
-        sigma_input_step = 1
-        showResults, showTable, menuOpen = true, false, false
-        status = sigmaEingabe.aufforderung()
-        platform.window:invalidate()
-        return
-    end
-    local success = finishSigmaCalculation(0)
-    showResults, showTable, menuOpen = success, false, false
-    status = "σx aus den eingetragenen Kraeften berechnet."
-    if not success then meldung("σx nicht berechenbar.", "Spannung nicht berechnet", true) end
-    platform.window:invalidate()
-end
-
 kern_build = function()
     kern_lines, kern_pts, kern_vertices = {}, {}, {}
     kern_hover_line, kern_hover_pt = nil, nil
@@ -4404,23 +4581,19 @@ local function drawKern(gc, w, h)
             local bu, bv = r.ys + ln.nu * ln.d, r.zs + ln.nv * ln.d
             gc:setColorRGB(220, 40, 40)
             gc:setFont("sansserif", "r", 9)
-            if math.abs(ln.nu) > 1e-9 then
-                local iu = r.ys + ln.d / ln.nu
-                local sx, sy = toScreen(iu, r.zs)
-                gc:fillArc(sx - 3, sy - 3, 6, 6, 0, 360)
-                local display_u, display_v = coordinatesForDisplay(iu, r.zs)
-                gc:drawString(a_lbl .. "=" .. formatLabel(display_length(display_u)), sx + 6, sy - 12)
-            else
-                drawInfArrow(gc, bu, bv, 1, 0, "inf")
-            end
-            if math.abs(ln.nv) > 1e-9 then
-                local iv = r.zs + ln.d / ln.nv
-                local sx, sy = toScreen(r.ys, iv)
-                gc:fillArc(sx - 3, sy - 3, 6, 6, 0, 360)
-                local display_u, display_v = coordinatesForDisplay(r.ys, iv)
-                gc:drawString(b_lbl .. "=" .. formatLabel(display_length(display_v)), sx + 6, sy - 12)
-            else
-                drawInfArrow(gc, bu, bv, 0, 1, "inf")
+            -- Achsenabschnitte auf den Hauptachsen, vom Schwerpunkt aus in Richtung der gezeichneten
+            -- Achsen 1 (η) und 2 (ζ): damit gilt wie von Hand η_K = -i_ζ²/a_η, ζ_K = -i_η²/a_ζ
+            local e1u, e1v, e2u, e2v = kernHAS.richtungen()
+            for _, e in ipairs({ { e1u, e1v, "η" }, { e2u, e2v, "ζ" } }) do
+                local proj = ln.nu * e[1] + ln.nv * e[2]
+                if math.abs(proj) > 1e-9 then
+                    local t = ln.d / proj
+                    local sx, sy = toScreen(r.ys + t * e[1], r.zs + t * e[2])
+                    gc:fillArc(sx - 3, sy - 3, 6, 6, 0, 360)
+                    gc:drawString(e[3] .. "=" .. formatLabel(display_length(t)), sx + 6, sy - 12)
+                else
+                    drawInfArrow(gc, bu, bv, e[1], e[2], "inf")
+                end
             end
         end
     elseif kernMode == 2 then
@@ -4444,8 +4617,16 @@ local function drawKern(gc, w, h)
                     gc:setColorRGB(255, 0, 0)
                     gc:fillArc(sx - 4, sy - 4, 8, 8, 0, 360)
                     gc:setFont("sansserif", "b", 9)
+                    -- Kernpunkt im gezeichneten KOS und im HAS (η, ζ vom Schwerpunkt aus)
                     local display_u, display_v = coordinatesForDisplay(p.u, p.v)
-                    gc:drawString(a_lbl .. "=" .. formatLabel(display_length(display_u)) .. ", " .. b_lbl .. "=" .. formatLabel(display_length(display_v)), sx + 8, sy - 14)
+                    local eta, zeta = kernHAS.koordinaten(p.u, p.v)
+                    local z1 = "KOS: " .. a_lbl .. "=" .. formatLabel(display_length(display_u)) .. ", " .. b_lbl .. "=" .. formatLabel(display_length(display_v))
+                    local z2 = "HAS: η=" .. formatLabel(display_length(eta)) .. ", ζ=" .. formatLabel(display_length(zeta))
+                    local breite = math.max(gc:getStringWidth(z1), gc:getStringWidth(z2))
+                    local tx = math.max(2, math.min(sx + 8, w - breite - 2))
+                    local ty = math.max(2, sy - 26)
+                    gc:drawString(z1, tx, ty)
+                    gc:drawString(z2, tx, ty + 12)
                 else
                     gc:setColorRGB(150, 30, 30)
                     gc:fillArc(sx - 3, sy - 3, 6, 6, 0, 360)
@@ -4679,29 +4860,7 @@ function on.paint(gc)
     drawOverlapPrompt(gc, w, h)
     drawShearSelector(gc, w, h)   -- zuletzt, damit Kraefte und Achsen nicht darueber liegen
     drawMenu(gc, w, h)
-    if qsMeldung then
-        -- Meldungsbox: rot bei Fehlergruenden, gelb bei Hinweisen; Text auf Boxbreite umbrechen
-        local boxW = math.min(w - 20, 300)
-        gc:setFont("sansserif", "r", 9)
-        local zeilen, zeile = {}, ""
-        for wort in tostring(qsMeldung.text):gmatch("%S+") do
-            local probe = (zeile == "") and wort or (zeile .. " " .. wort)
-            if zeile ~= "" and gc:getStringWidth(probe) > boxW - 16 then zeilen[#zeilen + 1] = zeile; zeile = wort else zeile = probe end
-        end
-        if zeile ~= "" then zeilen[#zeilen + 1] = zeile end
-        local boxH = math.min(28 + 13 * #zeilen, h - 10)
-        local boxX, boxY = math.floor((w - boxW) / 2), math.floor((h - boxH) / 2)
-        if qsMeldung.fehler then gc:setColorRGB(255, 205, 200) else gc:setColorRGB(255, 235, 150) end
-        gc:fillRect(boxX, boxY, boxW, boxH)
-        gc:setColorRGB(0, 0, 0); gc:setPen("thin", "smooth"); gc:drawRect(boxX, boxY, boxW, boxH)
-        gc:setFont("sansserif", "b", 10); gc:drawString(qsMeldung.titel .. ":", boxX + 8, boxY + 6)
-        gc:setFont("sansserif", "r", 9)
-        for zi, z in ipairs(zeilen) do
-            local y = boxY + 12 + 13 * zi
-            if y + 12 <= boxY + boxH then gc:drawString(z, boxX + 8, y) end
-        end
-        gc:drawString("[Esc]", boxX + boxW - 34, boxY + 6)
-    end
+    if qsMeldung then zeichneQsMeldung(gc, w, h) end
 
     if qsLoeschFrage then
         local boxW, boxH = math.min(w - 20, 260), 44
@@ -4772,7 +4931,7 @@ function on.mouseMove(x, y)
     if not found_type then
         -- Check duenn
         for i, elem in ipairs(duenn_elemente) do
-            local dist = point_to_line_dist(u, v, elem.points[1].u, elem.points[1].v, elem.points[2].u, elem.points[2].v)
+            local dist = duennKurve.abstand(elem, u, v)
             if dist < min_dist then
                 min_dist = dist
                 found_type = "duenn"
@@ -4916,7 +5075,7 @@ function on.charIn(c)
 
     if menuOpen and menuPage ~= 3 then
         local menu_number = tonumber(c)
-        local menu_count = menuPage == 1 and 9 or menuPage == 2 and 5 or menuPage == 5 and 8 or menuPage == 6 and 4 or menuPage == 7 and (#kraefte > 0 and 4 or 3) or menuPage == 8 and 2 or menuPage == 9 and 5 or menuPage == 10 and 6 or menuPage == 4 and 10 or 6
+        local menu_count = menuPage == 1 and 9 or menuPage == 2 and 5 or menuPage == 5 and 8 or menuPage == 6 and 4 or menuPage == 8 and 2 or menuPage == 9 and 6 or menuPage == 10 and 8 or menuPage == 4 and 10 or 6
         if menu_number and menu_number >= 1 and menu_number <= menu_count then
             menuRow = menu_number
             on.enterKey()
@@ -4991,6 +5150,12 @@ function on.charIn(c)
 end
 
 function on.arrowKey(k)
+    -- zu lange Meldungsbox: hoch/runter blaettert zeilenweise durch den Text
+    if qsMeldung and (qsMeldung.scrollMax or 0) > 0 and (k == "up" or k == "down") then
+        qsMeldung.scroll = math.max(0, math.min(qsMeldung.scrollMax, (qsMeldung.scroll or 0) + ((k == "down") and 1 or -1)))
+        platform.window:invalidate()
+        return
+    end
     if showTable and sigma_results then
         -- σx-Tabelle und Verteilung: hoch/runter scrollt, begrenzt auf den Inhalt
         local h = platform.window:height()
@@ -5035,10 +5200,9 @@ function on.arrowKey(k)
         elseif menuPage == 2 then n = 5
         elseif menuPage == 5 then n = 8
         elseif menuPage == 6 then n = 4
-        elseif menuPage == 7 then n = #kraefte > 0 and 4 or 3
         elseif menuPage == 8 then n = 2
-        elseif menuPage == 9 then n = 5
-        elseif menuPage == 10 then n = 6
+        elseif menuPage == 9 then n = 6
+        elseif menuPage == 10 then n = 8
         elseif menuPage == 4 then n = 10
         elseif menuPage == 3 then
             local elem = (selected_type == "massiv") and massiv_elemente[selected_idx] or (selected_type == "duenn" and duenn_elemente[selected_idx] or kraefte[selected_idx])
@@ -5110,6 +5274,18 @@ local function enterMenuInput()
             torsion_xi = math.max(0, val)
             berechneSystem()
             status = "ξ gesetzt auf " .. torsion_xi
+        elseif menuPage == 10 and (menuRow == 5 or menuRow == 6) and system_results then
+            -- Schwerpunkt im angezeigten KOS (Laengeneinheit der Anzeige); die andere Koordinate bleibt
+            local r = system_results
+            local ys_d, zs_d = coordinatesForDisplay(r.ys, r.zs)
+            local wert = input_to_internal(val, length_unit)
+            if menuRow == 5 then ys_d = wert else zs_d = wert end
+            local u, v = coordinatesFromDisplay(ys_d, zs_d)
+            local u0, v0 = qsWerte.bezugspunkt()
+            qsWerte.ys, qsWerte.zs = u - u0, v - v0
+            berechneSystem()
+            shear_results, shear_profile_visible, shear_selector_open = nil, false, false
+            status = "Manuelle Querschnittswerte: " .. qsWerte.namen()
         elseif menuPage == 10 and menuRow >= 1 and menuRow <= 4 and system_results then
             -- Eingaben im angezeigten KOS und in der Laengeneinheit der Anzeige, bezogen auf den Schwerpunkt
             local f = unit_factor(length_unit)
@@ -5180,7 +5356,7 @@ local function enterMenuAction()
     if menuPage == 5 then
         if menuRow == 1 then showResults, showTable, menuOpen = true, false, false; qsHinweis.pruefeDicke()
         elseif menuRow == 2 then showTable, showResults, menuOpen = true, false, false
-        elseif menuRow == 3 then openSigmaInput(true)
+        elseif menuRow == 3 then openSigmaInput(true)   -- eine Maske: N, My, Mz (und Δx bei Querkraeften)
         elseif menuRow == 4 then menuPage, menuRow = 6, 1
         elseif menuRow == 5 then openShearFromForces()
         elseif menuRow == 6 then
@@ -5199,14 +5375,6 @@ local function enterMenuAction()
         if menuRow == 1 or menuRow == 2 then kernMode = menuRow; kern_build(); menuOpen = false
         elseif menuRow == 3 then kernMode, menuOpen = 0, false
         elseif menuRow == 4 then menuPage, menuRow = 5, 4 end
-    elseif menuPage == 7 then
-        if #kraefte > 0 then
-            if menuRow == 1 then openSigmaFromForces()
-            elseif menuRow == 2 then openSigmaInput(false)
-            elseif menuRow == 3 then openSigmaInput(true)
-            else menuPage, menuRow = 5, 3 end
-        elseif menuRow == 1 then openSigmaInput(false) elseif menuRow == 2 then openSigmaInput(true)
-        else menuPage, menuRow = 5, 3 end
     elseif menuPage == 1 then
         local modes = {"rect", "circle", "triangle", "trapezoid", "sector", "segment", "massiv_linie", "force"}
         if modes[menuRow] then mode, pending, menuOpen = modes[menuRow], {}, false
@@ -5226,15 +5394,15 @@ local function enterMenuAction()
         elseif menuRow == 10 then inputMode, inputText = true, ""
         end
     elseif menuPage == 10 then
-        if menuRow >= 1 and menuRow <= 4 then
+        if menuRow >= 1 and menuRow <= 6 then
             if not system_results then meldung("Kein Querschnitt vorhanden.", "Hinweis", true)
             else inputMode, inputText = true, "" end
-        elseif menuRow == 5 then
-            qsWerte.A, qsWerte.Iy, qsWerte.Iz, qsWerte.Iyz = nil, nil, nil, nil
+        elseif menuRow == 7 then
+            loescheManuelleWerte()
             berechneSystem()
             shear_results, shear_profile_visible, shear_selector_open = nil, false, false
             status = "Berechnete Querschnittswerte wiederhergestellt."
-        elseif menuRow == 6 then menuPage, menuRow = 4, 1 end
+        elseif menuRow == 8 then menuPage, menuRow = 4, 1 end
     elseif menuPage == 9 then
         if menuRow == 1 then
             verschiebeKOSZumSchwerpunkt()
@@ -5244,7 +5412,8 @@ local function enterMenuAction()
         elseif menuRow == 4 then
             ftm_bezug = (ftm_bezug == "kos") and "schwerpunkt" or "kos"
             status = "Traegheitsmomente bezogen auf " .. (ftm_bezug == "kos" and "den KOS-Ursprung" or "den Schwerpunkt")
-        elseif menuRow == 5 then menuPage, menuRow = 4, 1 end
+        elseif menuRow == 5 then rasterPunkte = ((rasterPunkte or 1) + 1) % 3
+        elseif menuRow == 6 then menuPage, menuRow = 4, 1 end
     elseif menuPage == 3 then
         local elem = selected_type == "massiv" and massiv_elemente[selected_idx] or selected_type == "duenn" and duenn_elemente[selected_idx] or kraefte[selected_idx]
         if not elem then

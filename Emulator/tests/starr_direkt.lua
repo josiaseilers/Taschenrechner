@@ -68,6 +68,20 @@ local function vergleiche(titel, bauen, opts, erwarteRueckfall)
         T.wahr('direkt singulaer -> Rueckfall auf Grenzwert', b.randinfo:find('direkt singulaer', 1, true) ~= nil, b.randinfo)
     else
         T.wahr('direkte Methode verwendet', b.randinfo:find('starre Staebe: direkt', 1, true) ~= nil, b.randinfo)
+        -- die Exportmeldung nennt die Staebe, bei denen wneu bzw. uneu die Verschiebung selbst ist
+        local biege, dehn, msg = {}, {}, tostring(meldungText)
+        for i, s in ipairs(getStaebe()) do
+            if stabBiegesteif(s) then biege[#biege + 1] = i end
+            if stabDehnsteif(s) then dehn[#dehn + 1] = i end
+        end
+        if #biege > 0 then
+            local soll = 'wneu=w bei Stab ' .. table.concat(biege, ',')
+            T.wahr('Exportmeldung: ' .. soll, msg:find(soll, 1, true) ~= nil, msg)
+        end
+        if #dehn > 0 then
+            local soll = 'uneu=u bei Stab ' .. table.concat(dehn, ',')
+            T.wahr('Exportmeldung: ' .. soll, msg:find(soll, 1, true) ~= nil, msg)
+        end
     end
     for i, s in ipairs(getStaebe()) do
         gleich('wv' .. i, 'wv' .. i .. '(x)', a['wv' .. i])
@@ -193,6 +207,43 @@ fall('9 Rueckfall', function()
         local K = { pinned(node(0)), node(1), pinned(node(2)) }; K[2].last_x = 1
         return K, { bar(1, 2), bar(2, 3) }
     end, { dehnstarr = true }, true)
+end)
+
+fall('10 FEM: starre Teile gegenseitig unbestimmt', function()
+    T.abschnitt('Diagramme/Lagerkraefte: Aufteilung wie gleich steife starre Staebe, dazu Hinweis')
+    local function hinweis()
+        for _, h in ipairs(hinweisListe or {}) do if h:find('gegenseitig statisch unbestimmt', 1, true) then return true end end
+        return false
+    end
+    -- zwei dehnstarre Staebe hintereinander zwischen Festlagern, F = 1 in der Mitte
+    local K = { pinned(node(0)), node(1), pinned(node(4)) }; K[2].last_x = 1
+    local S = { bar(1, 2, { dehnsteif = true }), bar(2, 3, { dehnsteif = true }) }
+    if not T.rechne(K, S) then return end
+    local st = getStaebe()
+    -- gleich steif (EA gleich): Steifigkeit EA/L, Stab 1 (L = 1) ist dreimal so steif wie Stab 2 (L = 3)
+    T.zahl('N1 = 3/4 (Zug)', -st[1].s_local[1], 0.75, 1e-9)
+    T.zahl('N2 = -1/4 (Druck)', -st[2].s_local[1], -0.25, 1e-9)
+    T.wahr('Hinweis: gegenseitig statisch unbestimmt', hinweis(), table.concat(hinweisListe or {}, ' | '))
+    -- Reihenfolge der Staebe darf keine Rolle spielen
+    K = { pinned(node(0)), node(1), pinned(node(4)) }; K[2].last_x = 1
+    S = { bar(2, 3, { dehnsteif = true }), bar(1, 2, { dehnsteif = true }) }
+    if not T.rechne(K, S) then return end
+    st = getStaebe()
+    T.zahl('umgekehrte Stabreihenfolge: N (L = 1) = 3/4', -st[2].s_local[1], 0.75, 1e-9)
+    -- Zweifeldtraeger aus starren Staeben (EI, EA gleich): klassisches Ergebnis 3/8, 10/8, 3/8 qL
+    K = { pinned(node(0)), roller(node(2)), roller(node(4)) }
+    S = { bar(1, 2, { q = 1, q_str = '1', biegesteif = true, dehnsteif = true }),
+          bar(2, 3, { q = 1, q_str = '1', biegesteif = true, dehnsteif = true }) }
+    if not T.rechne(K, S) then return end
+    local kn = getKnoten()
+    T.zahl('Zweifeldtraeger starr: Mittellager 5/4 q l', kn[2].R_eta, 2.5, 1e-9)
+    T.zahl('Zweifeldtraeger starr: Endlager 3/8 q l', kn[1].R_eta, 0.75, 1e-9)
+    T.zahl('Stuetzmoment -q l^2/8', getStaebe()[1].s_local[6], -0.5, 1e-9)
+    -- statisch bestimmtes starres System: kein Hinweis
+    K = { fixed(node(0)), node(2) }; K[2].last_y = 1
+    S = { bar(1, 2, { biegesteif = true, dehnsteif = true }) }
+    if not T.rechne(K, S) then return end
+    T.wahr('Kragarm starr: kein Hinweis', not hinweis(), table.concat(hinweisListe or {}, ' | '))
 end)
 
 T.ende('Starre Staebe direkt')

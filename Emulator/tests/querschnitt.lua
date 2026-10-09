@@ -534,7 +534,7 @@ fall('20 FTM-Bezug im Menue', function()
     Q.menu(9, 1)
     local eintraege = Q.menuTexte()
     T.wahr('Menueeintrag zeigt den aktuellen Bezug', (eintraege[4] or ''):find('Schwerpunkt', 1, true) ~= nil, eintraege[4])
-    T.wahr('Rueckweg ist Zeile 5', (eintraege[5] or ''):find('Zurueck', 1, true) ~= nil, eintraege[5])
+    T.wahr('Rueckweg ist Zeile 6 (Zeile 5: Rasterpunkte)', (eintraege[6] or ''):find('Zurueck', 1, true) ~= nil, eintraege[6])
     -- Zeile 4 waehlen und mit Enter umschalten
     Q.menu(9, 4)
     on.enterKey()
@@ -1177,11 +1177,11 @@ fall('36 sigma mit Versatz der Querkraefte', function()
     Q.kraft({ u = 0, v = 0, fa = 0, fb = -1000, fc = 0 })
     T.rechne()
     local function schief(N, My, Mz, dx)
-        Q.menu(7, 3); on.enterKey()        -- mit Kraeften: 3 = Schiefe Spannung (N, My, Mz)
+        Q.menu(5, 3); on.enterKey()        -- Berechnungsmenue, 3 = sigma_x (Maske N, My, Mz, Δx)
         for _, w in ipairs({ N, My, Mz, dx }) do Q.tippe(w) end
         return Q.sigmaErgebnis()
     end
-    Q.menu(7, 3); on.enterKey()
+    Q.menu(5, 3); on.enterKey()
     local f = Q.sigmaFelder()
     wahr('Querkraft vorhanden: Feld Δx wird gefragt', #f == 4 and f[4] == 'x', table.concat(f, ','))
     -- Maske passt auf den Bildschirm, nichts ueberlappt
@@ -1246,22 +1246,32 @@ fall('36 sigma mit Versatz der Querkraefte', function()
         local hat = false
         for _, t in ipairs(T.texte) do if t:find('aus Querkraeften', 1, true) then hat = true end end
         wahr('Ergebnistabelle zeigt My/Mz aus Querkraeften', hat)
+        -- Reihenfolge: Momente, dann Querkraftblock, dann A; keine Zeile "umgerechnet" mehr
+        local pos = {}
+        for i, t in ipairs(T.texte) do
+            for _, m in ipairs({ 'umgerechnet', 'aus Normalkraeften', 'Kraftebene', 'aus Querkraeften', 'A [' }) do
+                if not pos[m] and t:find(m, 1, true) then pos[m] = i end
+            end
+        end
+        wahr('keine Zeile "M umgerechnet" mehr', pos['umgerechnet'] == nil)
+        wahr('Querkraftblock nach den Normalkraftzeilen und vor A',
+            pos['aus Normalkraeften'] and pos['Kraftebene'] and pos['A ['] and pos['aus Normalkraeften'] < pos['Kraftebene']
+            and pos['Kraftebene'] < pos['aus Querkraeften'] and pos['aus Querkraeften'] < pos['A ['])
     end
 
-    -- sigma aus Kraeften: fragt nur Δx
-    Q.menu(7, 1); on.enterKey()
+    -- sigma_x-Berechnung oeffnet direkt die eine Maske (kein Untermenue), Kraefte werden addiert
+    Q.menu(5, 3); on.enterKey()
     f = Q.sigmaFelder()
-    wahr('sigma aus Kraeften: nur Δx gefragt', #f == 1 and f[1] == 'x' and Q.sigmaStep() == 1, table.concat(f, ','))
-    Q.tippe('100')
-    local r6 = Q.sigmaErgebnis()
-    if r5 and r6 then zahl('sigma aus Kraeften = Ergebnis mit Δx', r6.sigma_max, r5.sigma_max, 1e-12) end
+    wahr('direkt die Maske N, My, Mz, Δx', #f == 4 and f[1] == 'N' and f[4] == 'x' and Q.sigmaStep() == 1, table.concat(f, ','))
+    wahr('Menue geschlossen', not (Q.menuStatus()))
+    on.escapeKey(); on.escapeKey()
 
     -- ohne Querkraefte: kein Δx-Feld
     T.reset()
     T.massiv({ type = 'rect', points = { P(-20, -30), P(20, 30) } })
     Q.kraft({ u = 10, v = 0, fa = 0, fb = 0, fc = 1000 })
     T.rechne()
-    Q.menu(7, 3); on.enterKey()
+    Q.menu(5, 3); on.enterKey()
     f = Q.sigmaFelder()
     wahr('nur Normalkraft: kein Δx-Feld', #f == 3, table.concat(f, ','))
     on.escapeKey(); on.escapeKey()
@@ -1399,7 +1409,7 @@ fall('38 Hinweis Profilbeiwert', function()
     T.rechne(); Q.meldungWeg()
     Q.schub(0, 0)
     Q.menu(8, 1); on.enterKey()
-    Q.tippe('0'); Q.tippe('0'); Q.tippe('0'); Q.tippe('50')
+    Q.tippe('0'); Q.tippe('0'); Q.tippe('50')             -- Q_y, Q_z, M_T (kein N mehr)
     wahr('Schub mit MT: Hinweis', text():find('ξ = 1', 1, true) ~= nil, text())
     wahr('  nur einmal in der Box', anzahl(text(), 'Profilbeiwert') == 1, anzahl(text(), 'Profilbeiwert'))
     -- Verwoelbung eines offenen Profils: Warnung plus Hinweis
@@ -1467,7 +1477,7 @@ fall('40 sigma-Tabelle ohne Ueberlappung', function()
     T.massiv({ type = 'rect', points = { P(0, 0), P(-40, -60) } })
     Q.kraft({ u = -10, v = -20, fa = -500, fb = -1000, fc = 2000 })
     T.rechne()
-    Q.menu(7, 3); on.enterKey()
+    Q.menu(5, 3); on.enterKey()
     for _, w in ipairs({ '-12345.678', '-98765.4321', '54321.987', '123.456' }) do Q.tippe(w) end
     Q.sigmaTabelleZeigen(true)
     local paare, ueberlappt, zu_breit, schlimmster = 0, 0, 0, ''
@@ -1514,7 +1524,7 @@ fall('41 Querschnittswerte ueberschreiben', function()
     local _, seite = Q.menuStatus()
     wahr('Optionen -> rechts, rechts: Seite Querschnittswerte', seite == 10, seite)
     local e = Q.menuTexte()
-    wahr('sechs Punkte', #e == 6, #e)
+    wahr('acht Punkte (A, drei I, zwei Schwerpunktkoordinaten, wiederherstellen, zurueck)', #e == 8, #e)
     wahr('Zeile 2 nennt I_y,S mit aktuellem Wert', e[2]:find('I_y,S', 1, true) ~= nil and e[2]:find('720000', 1, true) ~= nil, e[2])
     on.arrowKey('right'); _, seite = Q.menuStatus()
     wahr('noch einmal rechts: wieder Optionen', seite == 4, seite)
@@ -1576,7 +1586,7 @@ fall('41 Querschnittswerte ueberschreiben', function()
     zahl('Hauptachsenwinkel folgt', Q.R().alpha, 0.5 * math.atan2(2e5, 1e6 - 320000), 1e-12)
 
     -- berechnete Werte wiederherstellen
-    Q.menu(10, 5); on.enterKey()
+    Q.menu(10, 7); on.enterKey()
     zahl('wiederhergestellt: A = 2400', Q.R().A, 2400)
     zahl('wiederhergestellt: I_yz = 0', Q.R().Iyz, 0)
 
@@ -1596,6 +1606,303 @@ fall('41 Querschnittswerte ueberschreiben', function()
     Q.clear()
     T.massiv({ type = 'rect', points = { P(-20, -30), P(20, 40) } })
     zahl('nach Loeschen und gleichem Neuzeichnen: berechnet', T.rechne().A, 2800)
+end)
+
+fall('42 Duennwandige Kreise und Boegen', function()
+    T.abschnitt('Duennwandiger Kreis und Bogen: Mittellinie mal Dicke, Kreisrohr nach Bredt')
+    local R, t = 50, 2
+    Q.standardDicke(t)
+    -- wie auf dem Rechner: Duennwand-Menue, Kreis, Mittelpunkt und Randpunkt klicken
+    Q.menu(2, 2); on.enterKey()
+    wahr('Modus duennwandiger Kreis', Q.modus() == 'duenn_kreis', Q.modus())
+    local x, y = Q.toScreen(0, 0); on.mouseUp(x, y)
+    x, y = Q.toScreen(R, 0); on.mouseUp(x, y)
+    wahr('landet bei den duennwandigen Elementen', #Q.D() == 1 and #Q.M() == 0, #Q.D() .. ' / ' .. #Q.M())
+    local e = Q.D()[1]
+    wahr('  mit Typ und Standarddicke', e and e.type == 'duenn_kreis' and e.t == t, e and (tostring(e.type) .. ' t=' .. tostring(e.t)))
+    local r = Q.R()
+    zahl('A = 2 pi R t (nicht pi R^2)', r.A, 2 * math.pi * R * t)
+    zahl('I_y = pi R^3 t', r.Iy, math.pi * R ^ 3 * t)
+    zahl('I_z = pi R^3 t', r.Iz, math.pi * R ^ 3 * t)
+    zahl('I_yz = 0', r.Iyz, 0)
+    zahl('Schwerpunkt im Mittelpunkt', r.ys, 0)
+
+    -- Kreisrohr: Torsion nach Bredt, Schubmittelpunkt im Mittelpunkt
+    local tr = Q.torsion(1e6)
+    wahr('Torsion des Kreisrohrs berechnet', tr ~= nil, Q.meldung() and Q.meldung().text)
+    if tr then
+        wahr('  als geschlossene Zelle', tr.closed)
+        zahl('  I_T = 2 pi R^3 t', tr.It, 2 * math.pi * R ^ 3 * t)
+        zahl('  tau = M_T / (2 pi R^2 t)', tr.tau, 1e6 / (2 * math.pi * R ^ 2 * t))
+    end
+    local smp = Q.schubmittelpunkt()
+    wahr('Schubmittelpunkt = Mittelpunkt', smp and smp.known and math.abs(smp.u) < 1e-9 and math.abs(smp.v) < 1e-9)
+    -- Kraft neben dem Rohr: Torsion aus Kraeften um den Mittelpunkt
+    Q.meldungWeg()
+    Q.kraft({ u = R, v = 0, fa = 0, fb = 100, fc = 0 }); T.rechne()
+    local kt = Q.torsionResults()
+    wahr('Torsion aus Kraeften am Rohr', kt ~= nil, Q.meldung() and Q.meldung().text)
+    if kt then zahl('  M_T = F R', kt.M, 100 * R) end
+
+    -- Hover: nahe am Umfang ja, nahe am Mittelpunkt nicht (frueher: Strecke Mittelpunkt-Rand)
+    x, y = Q.toScreen(0, R + 0.2); on.mouseMove(x, y)
+    local ht, hi = Q.hoverZustand()
+    wahr('Hover am Umfang trifft den Kreis', ht == 'duenn' and hi == 1, tostring(ht))
+    x, y = Q.toScreen(R / 2, 0.1); on.mouseMove(x, y)
+    ht = Q.hoverZustand()
+    wahr('Hover auf dem Radius trifft ihn nicht mehr', ht ~= 'duenn', tostring(ht))
+
+    -- Schub: nur gerade Elemente (Meldung statt falscher Werte)
+    Q.meldungWeg()
+    local res = Q.schub(0, 1000)
+    wahr('Schub am Kreis abgelehnt', res == nil)
+
+    -- sigma-Ansicht zeichnet den Kreis ohne Fehler
+    Q.sigma(1000, 1e6, 0)
+    local ok, err = pcall(Q.paint, T.gc)
+    wahr('sigma-Ansicht zeichnet', ok, err)
+
+    -- Halbkreisbogen: Schwerpunkt 2R/pi, I_y = R^3 t (pi/2 - 4/pi), I_z = R^3 t pi/2
+    Q.clear(); Q.standardDicke(t)
+    Q.menu(2, 3); on.enterKey()
+    x, y = Q.toScreen(0, 0); on.mouseUp(x, y)
+    x, y = Q.toScreen(R, 0); on.mouseUp(x, y)
+    x, y = Q.toScreen(-R, 0); on.mouseUp(x, y)
+    wahr('Bogen landet bei den duennwandigen Elementen', #Q.D() == 1 and #Q.M() == 0 and Q.D()[1].type == 'duenn_kreis_bogen')
+    r = Q.R()
+    zahl('Bogen: A = pi R t', r.A, math.pi * R * t)
+    zahl('Bogen: z_S = 2R/pi', r.zs, 2 * R / math.pi)
+    zahl('Bogen: I_y = R^3 t (pi/2 - 4/pi)', r.Iy, R ^ 3 * t * (math.pi / 2 - 4 / math.pi))
+    zahl('Bogen: I_z = R^3 t pi/2', r.Iz, R ^ 3 * t * math.pi / 2)
+    -- freier Bogen: offene Torsion I_T = xi/3 L t^3
+    tr = Q.torsion(1000)
+    wahr('freier Bogen: offene Torsion', tr ~= nil and not tr.closed)
+    if tr then zahl('  I_T = L t^3 / 3', tr.It, math.pi * R * t ^ 3 / 3) end
+    -- Bogen mit Durchmesser geschlossen: koennte eine Zelle sein -> abgelehnt
+    Q.meldungWeg()
+    T.duenn(P(-R, 0), P(R, 0), t); T.rechne()
+    tr = Q.torsion(1000)
+    wahr('Bogen + Gerade: Torsion abgelehnt', tr == nil and Q.meldung() ~= nil and tostring(Q.meldung().text):find('Kreisrohr', 1, true) ~= nil,
+        Q.meldung() and Q.meldung().text)
+end)
+
+-- Kernflaeche: Beschriftungen beim Hovern (Zahl hinter "name=" im gezeichneten Text)
+local function kernTexte()
+    T.texte, T.pos = {}, {}
+    Q.paint(T.gc)
+    return T.pos
+end
+local function wertNach(pos, praefix)
+    for _, e in ipairs(pos) do
+        local v = e.t:match('^' .. praefix .. '([%-%d%.eE%+]+)')
+        if v then return tonumber(v), e end
+    end
+    return nil
+end
+
+fall('43 Kernflaeche: Abschnitte auf den Hauptachsen, Kernpunkte in KOS und HAS', function()
+    for _, rot in ipairs({ 180, 0, 90 }) do
+        T.abschnitt('Trapez mit I_yz ~= 0, KOS gedreht um ' .. rot .. ' Grad')
+        Q.setRotation(rot)
+        T.massiv({ type = 'trapezoid', points = { P(0, 0), P(6, 0), P(6, 4), P(0, 2) } })
+        local r = T.rechne()
+        wahr('Hauptachsen gedreht (I_yz ~= 0)', math.abs(r.Iyz) > 1e-6, r.Iyz)
+        local f = Q.laenge(1)                      -- Laengen wie angezeigt
+        local i_eta2, i_zeta2 = r.I1 / r.A * f * f, r.I2 / r.A * f * f
+        local linien, ecken = Q.kern(1)
+        wahr('vier Geraden, vier Kernpunkte', #linien == 4 and #ecken == 4, #linien .. '/' .. #ecken)
+        for i = 1, #linien do
+            -- Seite 1: Abschnitte der Geraden i auf den Hauptachsen
+            Q.kern(1); Q.kernHover(i, nil)
+            local pos = kernTexte()
+            local a_eta = wertNach(pos, 'η=')
+            local a_zeta = wertNach(pos, 'ζ=')
+            -- Seite 2: zugehoeriger Kernpunkt, im KOS und im HAS
+            Q.kern(2); Q.kernHover(nil, i)
+            pos = kernTexte()
+            local ky, kz = pos and wertNach(pos, 'KOS: [%a]='), nil
+            local ket = wertNach(pos, 'HAS: η=')
+            local kze
+            for _, e in ipairs(pos) do
+                local v = e.t:match('^HAS: .-ζ=([%-%d%.eE%+]+)')
+                if v then kze = tonumber(v) end
+                local a, b = e.t:match('^KOS: %a=([%-%d%.eE%+]+), %a=([%-%d%.eE%+]+)')
+                if a then ky, kz = tonumber(a), tonumber(b) end
+            end
+            -- KOS-Koordinaten wie gezeichnet
+            local du, dv = Q.cfd(ecken[i].u, ecken[i].v)
+            zahl('Gerade ' .. i .. ': Kernpunkt KOS y', ky, du * f, 1e-3)
+            zahl('Gerade ' .. i .. ': Kernpunkt KOS z', kz, dv * f, 1e-3)
+            -- Handformel im HAS: η_K = -i_ζ²/a_η, ζ_K = -i_η²/a_ζ (Abschnitt unendlich: Kernpunkt auf der Achse)
+            if a_eta then zahl('Gerade ' .. i .. ': η_K = -i_ζ²/a_η', ket, -i_zeta2 / a_eta, 2e-3)
+            else zahl('Gerade ' .. i .. ': η_K = 0 (parallel zu HA 1)', ket, 0, 2e-3) end
+            if a_zeta then zahl('Gerade ' .. i .. ': ζ_K = -i_η²/a_ζ', kze, -i_eta2 / a_zeta, 2e-3)
+            else zahl('Gerade ' .. i .. ': ζ_K = 0 (parallel zu HA 2)', kze, 0, 2e-3) end
+        end
+        -- gezeichnete Hauptachse 1 zeigt in Richtung η
+        Q.kern(0)
+        local pos = kernTexte()
+        local sx, sy = Q.toScreen(r.ys, r.zs)
+        local e1u, e1v = kernHAS.richtungen()
+        for _, e in ipairs(pos) do
+            if e.t == '1' then
+                local dx, dy = e.x - 2 - sx, e.y + 8 - sy
+                wahr('Achse 1 in Richtung η gezeichnet', dx * e1u - dy * e1v > 0.99 * math.sqrt(dx * dx + dy * dy), dx .. ', ' .. dy)
+            end
+        end
+        T.reset()
+    end
+end)
+
+fall('44 Kernflaeche Rechteck: Kerndrittel', function()
+    T.abschnitt('Rechteck 4 x 6 mit KOS in der Ecke: obere Kante -> a_ζ = h/2, Kernpunkt h/6')
+    T.massiv({ type = 'rect', points = { P(0, 0), P(4, 6) } })
+    local r = T.rechne()
+    local linien = Q.kern(1)
+    local f = Q.laenge(1)
+    local gefunden = false
+    for i, ln in ipairs(linien) do
+        Q.kernHover(i, nil)
+        local pos = kernTexte()
+        local a_eta, a_zeta = wertNach(pos, 'η='), wertNach(pos, 'ζ=')
+        local inf = false
+        for _, e in ipairs(pos) do if e.t == 'inf' then inf = true end end
+        if a_zeta and not a_eta then
+            gefunden = true
+            zahl('Abschnitt |a_ζ| = h/2 vom Schwerpunkt', math.abs(a_zeta), 3 * f, 1e-6)
+            wahr('parallel zu HA 1: Pfeil inf', inf)
+            Q.kern(2); Q.kernHover(nil, i)
+            pos = kernTexte()
+            local kze
+            for _, e in ipairs(pos) do
+                local v = e.t:match('^HAS: .-ζ=([%-%d%.eE%+]+)')
+                if v then kze = tonumber(v) end
+            end
+            zahl('Kerndrittel: |ζ_K| = h/6', math.abs(kze or 0), 1 * f, 1e-6)
+            wahr('Kernpunkt auf der anderen Seite', kze and a_zeta * kze < 0, tostring(kze))
+            break
+        end
+    end
+    wahr('Gerade parallel zu einer Hauptachse gefunden', gefunden)
+end)
+
+fall('45 Lange Meldung scrollt mit hoch/runter', function()
+    T.abschnitt('Meldungsbox laenger als der Bildschirm: Ausschnitt, Zeilenzaehler, Pfeiltasten')
+    T.reset()
+    qsMeldung = { text = 'Anfang ' .. string.rep('Wort ', 200) .. 'Schluss', titel = 'Hinweis' }
+    local function texte() T.texte, T.pos = {}, {}; Q.paint(T.gc); return T.texte end
+    local function hat(muster)
+        for _, t in ipairs(texte()) do if t:find(muster, 1, true) then return true end end
+        return false
+    end
+    texte()
+    local m = Q.meldung()
+    wahr('Meldung ist scrollbar', (m.scrollMax or 0) > 0, m.scrollMax)
+    wahr('oben: Anfang sichtbar, Schluss nicht', hat('Anfang') and not hat('Schluss'))
+    on.arrowKey('down')
+    zahl('Pfeil runter: eine Zeile weiter', m.scroll, 1)
+    on.arrowKey('up'); on.arrowKey('up')
+    zahl('Pfeil hoch: nicht ueber den Anfang hinaus', m.scroll, 0)
+    for _ = 1, 300 do on.arrowKey('down') end
+    texte()
+    zahl('Pfeil runter: nicht ueber das Ende hinaus', m.scroll, m.scrollMax)
+    wahr('unten: Schluss sichtbar, Anfang nicht', hat('Schluss') and not hat('Anfang'))
+    local zaehler = false
+    for _, t in ipairs(texte()) do if t:match('^%d+%-%d+/%d+$') then zaehler = true end end
+    wahr('Zeilenzaehler neben [Esc]', zaehler)
+    on.escapeKey()
+    wahr('Esc schliesst die Meldung', Q.meldung() == nil)
+end)
+
+fall('47 Schwerpunkt ueberschreiben', function()
+    T.abschnitt('y_S, z_S manuell: sigma, W und Normalkraft-Hebel nehmen ihn, Schub bleibt bei der Geometrie')
+    T.reset()
+    -- Rechteck 40 (y) x 60 (z) im Ursprung; rotation 180: y = -u, z = -v
+    T.massiv({ type = 'rect', points = { P(-20, -30), P(20, 30) } })
+    local r = T.rechne()
+    local tau_vorher = Q.schub(0, 1000).max_tau
+    local function setzeWert(zeile, wert) Q.meldungWeg(); Q.menu(10, zeile); on.enterKey(); Q.tippe(wert) end
+    setzeWert(5, '5'); setzeWert(6, '10')
+    r = Q.R()
+    local ys_d, zs_d = Q.cfd(r.ys, r.zs)
+    zahl('y_S angezeigt = 5', ys_d, 5)
+    zahl('z_S angezeigt = 10', zs_d, 10)
+    zahl('geometrischer Schwerpunkt bleibt gemerkt', r.geo.ys, 0)
+    zahl('I_y bleibt berechnet', r.Iy, 720000)
+    zahl('W_y mit neuem Randabstand 30 + 10', r.Wu, 720000 / 40)
+    local e = Q.menuTexte()
+    wahr('Menue: Zeile 5 y_S manuell', (e[5] or ''):find('y_S setzen', 1, true) ~= nil and e[5]:find('manuell', 1, true) ~= nil, e[5])
+    -- sigma: Abstand der aeussersten Faser vom neuen Schwerpunkt ist 40
+    local sr = Q.sigma(0, 1e6, 0)
+    zahl('sigma_max = M_y * 40 / I_y', math.max(math.abs(sr.sigma_max), math.abs(sr.sigma_min)), 1e6 * 40 / 720000, 1e-9)
+    -- Normalkraft im Ursprung (geometrischer Schwerpunkt): Hebel zum neuen Schwerpunkt 10 bzw. 5
+    -- (Kragtraeger-Fall: Moment aus exzentrischer Normalkraft haengt am Schwerpunkt der Aufgabe)
+    Q.kraft({ u = 0, v = 0, fa = 0, fb = 0, fc = 1000 })
+    sr = Q.sigma(0, 0, 0)
+    zahl('|M_y aus Normalkraft| = 1000 * 10', math.abs(sr.force_Ma_Nmm), 1e4, 1e-9)
+    zahl('|M_z aus Normalkraft| = 1000 * 5', math.abs(sr.force_Mb_Nmm), 5e3, 1e-9)
+    local ks = Q.K(); for i = #ks, 1, -1 do ks[i] = nil end
+    -- Schub rechnet mit dem Schwerpunkt der Geometrie, also wie vorher
+    zahl('Schub unveraendert (Geometrie)', Q.schub(0, 1000).max_tau, tau_vorher, 1e-9)
+    -- Ergebnisfeld und sigma-Tabelle zeigen es
+    local ef, markiert = T.ergebnisfeld(), 0
+    for _, zeile in ipairs(ef) do if zeile:find('_s = ', 1, true) and zeile:find('(manuell)', 1, true) then markiert = markiert + 1 end end
+    zahl('Ergebnisfeld: y_s und z_s als manuell markiert', markiert, 2)
+    Q.sigma(0, 1e6, 0); Q.sigmaTabelleZeigen(true)
+    T.texte, T.pos = {}, {}; Q.paint(T.gc)
+    local hinweis = false
+    for _, tx in ipairs(T.texte) do if tx:find('Manuelle Werte: y_S, z_S', 1, true) then hinweis = true end end
+    wahr('sigma-Tabelle nennt den manuellen Schwerpunkt', hinweis)
+    Q.sigmaTabelleZeigen(false)
+    -- KOS verschieben: der Schwerpunkt bleibt an derselben Stelle des Querschnitts
+    local u_rel = Q.R().ys - Q.M()[1].points[1].u
+    Q.menu(9, 2); on.enterKey(); Q.tippe('7')
+    zahl('nach KOS-Verschiebung: Lage relativ zum Querschnitt gleich', Q.R().ys - Q.M()[1].points[1].u, u_rel, 1e-9)
+    -- wiederherstellen
+    Q.menu(10, 7); on.enterKey()
+    zahl('wiederhergestellt: Schwerpunkt = Geometrie', Q.R().ys, Q.R().geo.ys, 1e-9)
+    wahr('keine manuellen Werte mehr', Q.menuTexte()[5]:find('manuell', 1, true) == nil, Q.menuTexte()[5])
+    Q.menu(nil)
+end)
+
+fall('46 Rasterpunkte: keine, normal, dick', function()
+    T.abschnitt('Weitere Optionen, Zeile 5 schaltet die Rasterpunkte Normal -> Dick -> Keine -> Normal')
+    T.reset()
+    local function punkte()
+        local n1, n2, grau = 0, 0, false
+        local g = setmetatable({}, { __index = function(_, k)
+            if k == 'setColorRGB' then return function(_, r, gg, b) grau = (r == 180 and gg == 180 and b == 180) end end
+            if k == 'fillRect' then return function(_, _, _, w, h)
+                if grau and w == 1 and h == 1 then n1 = n1 + 1 elseif grau and w == 2 and h == 2 then n2 = n2 + 1 end
+            end end
+            if k == 'getStringWidth' then return function(_, t) return T.breite(t) end end
+            if k == 'getStringHeight' then return function() return 12 end end
+            return function() end
+        end })
+        Q.menu(nil)
+        Q.paint(g)
+        return n1, n2
+    end
+    zahl('ab Werk: Normal', rasterPunkte, 1)
+    local n1, n2 = punkte()
+    wahr('Normal: 1-px-Punkte, keine dicken', n1 > 50 and n2 == 0, n1 .. '/' .. n2)
+    local zeilen = Q.menuTexte and (function() Q.menu(9, 5); return Q.menuTexte() end)()
+    wahr('Menue zeigt "5. Rasterpunkte (Normal)" und "6. < Zurueck"', zeilen and zeilen[5] == '5. Rasterpunkte (Normal)' and zeilen[6] == '6. < Zurueck',
+        zeilen and (tostring(zeilen[5]) .. ' | ' .. tostring(zeilen[6])))
+    Q.menu(9, 5); on.enterKey()
+    zahl('Enter: Dick', rasterPunkte, 2)
+    local d1, d2 = punkte()
+    wahr('Dick: gleich viele Punkte, alle 2 px', d1 == 0 and d2 == n1, d1 .. '/' .. d2)
+    Q.menu(9, 5); on.enterKey()
+    zahl('Enter: Keine', rasterPunkte, 0)
+    local k1, k2 = punkte()
+    wahr('Keine: keine Rasterpunkte', k1 == 0 and k2 == 0, k1 .. '/' .. k2)
+    Q.menu(9, 5); on.enterKey()
+    zahl('Enter: wieder Normal', rasterPunkte, 1)
+    Q.menu(9, 6); on.enterKey()
+    local offen, seite = Q.menuStatus()
+    wahr('Zeile 6 fuehrt zurueck zu den Optionen', seite == 4, seite)
+    Q.menu(nil)
 end)
 
 T.ende('Querschnitt')

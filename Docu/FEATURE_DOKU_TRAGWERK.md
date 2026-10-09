@@ -73,17 +73,49 @@ Für Vergleichsrechnungen mit der Musterlösung wird standardmäßig $EA=10^{10}
 
 Zusätzlich gibt es im Obermenü, Seite 4, `Standard-EA dehnstarr` (ab Werk aus): Dann sind alle Stäbe dehnsteif, deren $EA$ nicht im Stabmenü eingegeben wurde. Ein im Stabmenü eingegebenes $EA$ nimmt den Stab aus (Anzeige `dehnsteif: Nein`); `Alle EA setzen` im Obermenü macht alle Stäbe wieder zu Standard-Stäben. Ein symbolisches $EA$ (z. B. `EA`) bleibt immer dehnbar.
 
-Ein Stab kann durch `F` umgedreht werden. Dabei werden Anfang und Ende vertauscht und die zugehörigen Anfangs- und Endlasten mitgetauscht.
+Ein Stab kann durch `F` umgedreht werden. Dabei werden nur Anfangs- und Endknoten vertauscht (`k1`, `k2`); alle anderen Stabwerte (Trapezlasten, Lastfunktionen, Gelenke A/B, Temperatur) bleiben unverändert und beziehen sich danach auf die neue Richtung. Das System gilt als geändert (`systemBerechnet = false`, rote Modus-Schrift), die Lasten werden neu aufbereitet.
 
 ### 2.3 Geradstäbe und Bögen
 
-Gerade Stäbe werden mit der üblichen lokalen Stabachse ausgewertet. Ein Stab mit gültigem Radius wird als Kreisbogenelement behandelt oder für die grafische Darstellung durch Segmente angenähert.
+Gerade Stäbe werden mit der üblichen lokalen Stabachse ausgewertet. Ein Stab mit Bogenradius $|R| \ge L/2$ ist ein Kreisbogen (`istBogen`), das Vorzeichen von $R$ legt die Seite fest; ein kleinerer Radius wird ignoriert und der Stab gerade gerechnet.
+
+Für die Rechnung wird der Bogen in `bogenSegmente` gerade Teilstäbe zerlegt (Obermenü Seite 3, Bogenauflösung, Standard 20; Geometrie in `bogenGeometrie`). Das erste und das letzte Teilstück liegen tangential und sind so lang wie Bogenlänge/n, die übrigen Teilungspunkte liegen auf dem Bogen bei gleichmäßig geteilter Sehne. Die Teilstäbe erben EA, EI, die Schalter biegesteif/dehnsteif, die Gelenke an den Bogenenden, die Temperatur und die Lasten des Bogens.
+
+**Lasten auf dem Bogen** (`bogenLastWerte`, `bogenTeilLasten`, verteilt in `injectVirtualArcs`):
+
+- `q` wirkt quer zum jeweiligen Teilstab, also radial, positiv in der lokalen Querrichtung wie beim geraden Stab (je nach Vorzeichen von $R$ zum Mittelpunkt hin oder von ihm weg). `n` wirkt längs, also tangential.
+- Die Trapezanteile `q_A`/`q_B` und `n_A`/`n_B` laufen linear über die Bogenlänge.
+- Globale Linienlasten `p_X`/`p_Y` wirken je Teilstab in ihrer globalen Richtung; projiziert je Grundriss- bzw. Höhenlänge des Teilstabs, sonst je Bogenlänge.
+- Momentenlast `m` je Bogenlänge, Temperatur `To`, `Tu` (mit α und h) wie beim geraden Stab.
+- **Lastfunktionen mit `x`:** `x` ist auf dem Bogen der **Winkel ab Stabanfang im Winkelmodus des Rechners** (RAD: 0 bis α in rad, DEG: 0 bis α in Grad), also dasselbe wie `p` in `M_bogen_i(p)`. Eine radiale Last `q = 2*cos(x)` stimmt so in jedem Winkelmodus. Ausgewertet wird an den Teilungspunkten (`bogenWinkelFaktor` erkennt den Modus über `cos(180)` bzw. `cos(200)`), zwischen zwei Punkten linear.
+- Lasten je Bogenlänge (`p_X`, `p_Y` ohne Projektion, `m`) werden je Teilstab mit Bogenstück/Teilstablänge skaliert, damit die Summe exakt ist (Eigengewicht: $g R \alpha$). Konstante radiale und tangentiale Lasten brauchen das nicht, ihre Resultierende hängt nur von den Endpunkten ab und ist auf dem Polygon exakt.
+- Kann das CAS eine Lastfunktion nicht auswerten, rechnet das Programm dort mit 0 und meldet es in der gelben Hinweisbox (13.2).
+
+Der Bogen selbst bringt keinen Lastvektor mehr ein (`baueLastvektor`). Früher bekamen die Teilstäbe keine Lasten, und der Bogen trug sie als Sehnenlast, wovon der Anteil am festgehaltenen Knoten verloren ging (eingespannter Viertelkreis R = 2 mit q = 1: $R_\xi = -1$, $R_\eta = 1$ statt $-2$, $2$).
+
+**Genauigkeit:** Exakt sind die Lagerkräfte und die Schnittgrößen an den Teilungspunkten auf dem Bogen bei konstanter radialer Last, die Gesamtlast bei Eigengewicht, projizierte Lasten und das Streckenmoment. Von der Teilung abhängig (Fehler etwa mit dem Quadrat des Teilwinkels, bei 20 Teilen um 1e-3) sind die Hebelarme von Eigengewicht und tangentialer Last, Lastfunktionen und alle Verformungen.
+
+**Diagramme:** `arc_plot_data` hält je Teilstück die Werte am Anfang (`N`, `Q`, `M1`) und am Ende (`N2`, `Q2`, `M2`) sowie die Winkel `phi1`, `phi2`. Gezeichnet wird an den Teilungspunkten; an einem inneren Punkt für N und Q der Mittelwert aus Ende des linken und Anfang des rechten Teilstücks (mit Last auf dem Bogen sind beide verschieden). Die Lastsymbole stehen auf dem Bogen (q radial, n tangential, p_X/p_Y und m an Punkten des Bogens).
 
 **Grenzen:**
 
-- Bögen werden in Teilen der Darstellung und Auswertung segmentiert; die Segmentzahl ist einstellbar.
-- Sehr kurze, geometrisch entartete oder ungültige Bogenkonfigurationen sind nicht zuverlässig auswertbar.
-- Die Darstellung von Bogen-Schnittgrößen und Bogenverformungen ist gegenüber geraden Stäben stärker von der gewählten Abtastung abhängig.
+- Kreisbögen bis zum Halbkreis (der kleinere Bogen zwischen den Knoten). Der Halbkreis mit $R = L/2$ geht (früher Division durch null bei der Tangente).
+- Ergebnisse hängen von der Bogenauflösung ab. Bei großen Öffnungswinkeln liegen die Teilungspunkte an den Enden weit auseinander (gleich geteilte Sehne, beim Halbkreis bis etwa 37°), dort ist die Näherung am gröbsten: Bogenauflösung erhöhen.
+- Kein symbolischer Modus und kein Rand-LGS mit Bögen (Abbruch mit Meldung).
+
+### 2.4 Systeme speichern und öffnen (Obermenü Seite 4)
+
+Obermenü `O`, Seite 4, Zeile 5 **„System speichern als:“** und Zeile 6 **„System öffnen:“**: `Enter`, Nummer eintippen (ganze Zahl ≥ 0), `Enter`. Gespeichert wird in die TI-Variable `system<Nr>` (z. B. `system3`) des Dokuments, als ein String:
+
+`TWS1;G:feld=wert,…;K:feld=wert,…;S:feld=wert,…`
+
+- `G`: Einstellungen `rasterMass`, `rasterMass_str`, `defEA`, `defEA_str`, `defEI`, `defEI_str`, `randDehnstarr`, `randStarrDirekt`, `fachwerkModus`, `pxProMeter`, `offsetX`, `offsetY` (immer alle).
+- `K` je Knoten, `S` je Stab: alle Eingabefelder (`KNOTEN_EINGABEN`, `STAB_EINGABEN`: Koordinaten, Lager, Gelenke, Lasten, Federn, Steifigkeiten, starre Stäbe, Temperatur, jeweils mit Eingabetext), aber nur, wenn sie vom Standard eines neuen Knotens bzw. Stabes abweichen.
+- Werte: `#Zahl` (verlustfrei), `'Text` (`% ; , = : "` und Zeilenumbruch als `%XX`), `T`/`F`, `~` für nil.
+
+Öffnen ersetzt das aktuelle System (vorher `loescheAlles`), setzt zuerst die Einstellungen (der Standard neuer Stäbe hängt von `defEA`/`defEI` ab), dann Knoten und Stäbe, und rechnet beim nächsten Zeichnen neu. Rechenergebnisse und KGV-Zustände werden nicht gespeichert. Das Menü zeigt die zuletzt benutzte Nummer (`system3`), sonst „Nr. eingeben“.
+
+**Grenzen:** Speichern unter einer vorhandenen Nummer überschreibt ohne Rückfrage. Die Variable ist eine normale Dokumentvariable (`DelVar system3` löscht sie; gespeichert ist sie erst mit dem Dokument). Unbekannte Feldnamen werden beim Öffnen ignoriert, Stäbe mit ungültigen Knotennummern verworfen. Getestet in `Emulator/tests/verschiebung.lua` (Rundlauf mit gleichem Fingerabdruck, Sonderzeichen, nil-Felder, Fehlerfälle).
 
 ## 3. Lager, Gelenke und Federn
 
@@ -127,18 +159,23 @@ Exportiert werden je Stab `wneu_i(x) = EI·w_i(x)` und `uneu_i(x) = EA·u_i(x)` 
 
 **Lesbare Randbedingungen:** Vor dem Lösen werden alle Bedingungen ausgewertet, die nur noch eine Unbekannte enthalten (Lager, freie Enden, starre Stäbe); die betreffenden Größen stehen damit fest. In der Anzeige von `randbed` wird eine Größe, die *vor* dieser Bedingung schon feststand, durch ihren Wert ersetzt — wie in einer Handrechnung. Aus `"w1(x1=l)=u2(x2=3*l)"` wird `"w1(x1=l)=0"`, wenn Stab 2 dehnstarr und gehalten ist. Ersetzt wird nur chronologisch Vorheriges und nur, wenn der Wert kurz bleibt (bis 24 Zeichen); sonst steht weiter der Name da.
 
-**Biegelinie und Längslinie getrennt:** Von den gesuchten Konstanten aus wird rückwärts verfolgt, welche Bedingungen die Biegelinie (alle `w`) und welche die Längslinie (alle `u`) braucht; eingesetzte Zahlenwerte trennen dabei nicht mehr. Sind beide unabhängig, steht `randbed` in zwei Gruppen mit Überschrift (`"--- nur Biegelinie w ---"`, `"--- nur Längslinie u ---"`). Genügt eine Gruppe für sich (typisch, wenn dehnstarre oder biegesteife Stäbe die Kopplung auflösen), heißt sie `"--- Biegelinie w: diese genuegen ---"`, der Rest folgt unter `"--- zusaetzlich fuer Laengslinie u ---"`. `randinfo` nennt den Fall. Bleiben beide gekoppelt (z. B. Rahmen, deren Normalkräfte die Querkräfte des Nachbarstabs aufnehmen), bleibt die Liste ungeteilt.
+**Biegelinie und Längslinie getrennt:** Von den gesuchten Konstanten aus wird rückwärts verfolgt, welche Bedingungen die Biegelinie (alle `w`) und welche die Längslinie (alle `u`) braucht; eingesetzte Zahlenwerte trennen dabei nicht mehr. Sind beide unabhängig, steht `randbed` in zwei Gruppen mit Überschrift (`"--- nur Biegelinie w ---"`, `"--- nur Längslinie u ---"`). Genügt eine Gruppe für sich (typisch, wenn dehnstarre oder biegesteife Stäbe die Kopplung auflösen), heißt sie `"--- Biegelinie w: diese genuegen ---"`, der Rest folgt unter `"--- zusaetzlich fuer Laengslinie u ---"`. `randinfo` nennt den Fall. Bleiben beide gekoppelt, wird über dehnsteife Stäbe durchgereicht (`neuDurchreichen`): Bei der direkten Methode sind `u = C2` und `N = C1` eines dehnsteifen Stabes an beiden Enden dieselbe Unbekannte, ebenso die Knotenunbekannten `ux(K)`, `uy(K)`. Eine Bedingung mit nur einer solchen Unbekannten legt sie fest und wird in die übrigen eingesetzt, wie von Hand (Zweigelenkrahmen: aus `"u2(x2=0)=w1(x1=l)"`, `"u3(x3=0)=u2(x2=l)"`, `"w4(x4=0)=-u3(x3=l)"` wird `"w4(x4=0)=-w1(x1=l)"`, aus den Normalkräften des Riegels `"EIw1'''(x1=l)=-EIw4'''(x4=0)"`). Bleiben genau 4 Bedingungen je Stab nur mit Biegelinien-Konstanten übrig, stehen sie unter `"--- Biegelinie w: diese genuegen ---"`, die eingesetzten Bedingungen unter `"--- zusaetzlich fuer Laengslinie u ---"`; `randinfo` ergänzt „u und N der dehnsteifen Staebe eingesetzt“. Ungeteilt bleibt die Liste bei dehnbaren Stäben, die Normal- und Querkräfte koppeln (z. B. Zweigelenkrahmen mit endlichem EA der Stiele), und bei der Grenzwert-Methode. Lasten am Riegel (Horizontalkraft, Längslast n) wandern als Konstante mit, z. B. `"EIw1'''(x1=l)+EIw4'''(x4=0)+H=0"`; Symbole behalten dabei die Schreibweise der Eingabe. Getestet in `Emulator/tests/randbed.lua` (Fälle 5–8).
 
 **Kleineres Gleichungssystem:** Die Vorelimination löst Zeilen mit einer Unbekannten auf, streicht Unbekannte, die nur in einer einzigen Zeile vorkommen (sie werden am Schluss aus dieser Zeile nachgerechnet), und ersetzt Zeilen der Form `x_j = f·x_m` mit reinem Zahlenfaktor — das tritt vor allem bei starren Stäben auf, deren Konstanten unmittelbar an denen des Nachbarstabs hängen. Für `simult` bleibt dadurch ein deutlich kleineres System (Klausur TM2 Aufgabe 4 mit Gelenken: 10 statt 15 Unbekannte, ohne Gelenke 14 statt 21; Export rund ein Drittel schneller). Bei der Grenzwertmethode wird nur gestrichen und nicht eingesetzt, weil die `rleps`-Ausdrücke sonst zu groß werden und mehr Zeit kosten, als das kleinere LGS spart. Die exportierten Funktionen sind in allen Fällen identisch. Was dann noch übrig ist, wird in unabhängige Blöcke zerlegt und Block für Block gelöst (Meldung „simult mit n Unbekannten (Block i von k)“); ein beidseitig eingespannter Träger mit Quer- und Längslast braucht so z. B. ein 6er- und ein 3er-System statt eines 9er-Systems.
 
 **Starre Stäbe im Rand-LGS (biegesteif, dehnsteif, Standard-EA dehnstarr, siehe 2.2):** Obermenü `O`, Seite 4, `Starre Stäbe (Export)` wählt die Methode.
 
+- **Auch in der FEM (Diagramme, Lagerkräfte):** Halten sich starre Teile gegenseitig statisch unbestimmt, wählt `loeseMitZwang` unter allen Gleichgewichtslösungen die mit minimaler Ergänzungsenergie gleich steifer starrer Stäbe (EA = EI = 1) – dieselbe Aufteilung wie der Grenzwert im Rand-LGS – und `sammleHinweise` meldet das. Getestet in `starr_direkt.lua` (Fall 10).
 - `direkt` (ab Werk): Ein starrer Stab bewegt sich nur als Starrkörper, $w = w_0 + w'_0 x - \kappa_T x^2/2$ bzw. $u = u_0 + \varepsilon_T x$; seine Schnittgrößen folgen aus dem Gleichgewicht. Das LGS ist exakt und linear, ohne Hilfssymbol und ohne Grenzwert, und deutlich schneller (Klausur TM2 Aufgabe 4 mit starrem Balken: etwa halbe Zeit, `simult` rund 20-mal schneller). `wneu`/`uneu` starrer Stäbe sind hier immer die Verschiebung (wie `wv`/`uv`). Halten sich starre Teile gegenseitig statisch unbestimmt (z. B. zwei starre Stäbe zwischen zwei Festlagern), ist das direkte LGS singulär; dann wird automatisch mit dem Grenzwert gerechnet und das in `randinfo` vermerkt.
 - `Grenzwert`: die bisherige Methode, siehe unten.
 
 Bei der Grenzwert-Methode steht im LGS für starre Stäbe `EI = 1/rleps` bzw. `EA = 1/rleps`, danach wird jede Konstante mit `limit(…, rleps, 0)` bestimmt, wie in der Handrechnung mit starren Stäben. So verschwinden die EI/EA-Anteile (früher z. B. `ei*h*l/10000000000`), und Fälle, in denen sich Kräfte nach den Steifigkeiten verteilen (Horizontallast zwischen zwei Festlagern), bleiben lösbar; gleich starre Stäbe teilen dann gleichmäßig. `wneu_i(x)` bzw. `uneu_i(x)` bleiben `EI·w_i` bzw. `EA·u_i`, solange das endlich ist (z. B. Kragarm, Stütze mit gehaltenem Fuß). Bewegt sich ein starrer Stab als Ganzes (Riegel eines verschieblichen Rahmens, starrer Balken auf Federn) oder durch Temperatur, wird stattdessen die Verschiebung `w_i(x)` bzw. `u_i(x)` exportiert. Welche Stäbe starr sind und welche Funktionen Verschiebungen sind, steht im Spaltenvektor `randinfo`. Eine behinderte Temperaturverformung eines starren Stabes (unendliche Zwangskraft) führt zum Abbruch mit Meldung.
 
 **Verschiebungen direkt:** Zusätzlich werden `wv_i(x) = w_i(x)` und `uv_i(x) = u_i(x)` exportiert (die Verschiebungen selbst, bei starren Stäben entsprechend). Damit lassen sich Klausurfragen wie „Bestimmen Sie $\Delta T$ so, dass sich Punkt A nicht verschiebt“ oder „… um 0,5 mm verschiebt“ direkt auf dem Rechner lösen, z. B. `solve(uv1(l)=0,dt)` oder `solve(wv2(2*l)=1/2,f)`. Voraussetzung ist, dass die gesuchte Größe als Symbol eingegeben wurde.
+
+**Knotenverschiebungen (Knotenmenü Seite 4, Zeile 1 „Verschiebung“):** exportiert `ux_k<i>` (global x, nach rechts), `uy_k<i>` (global y, nach unten) und `phi_k<i>` (gegen den Uhrzeigersinn) für den Knoten, symbolisch wie das Rand-LGS. Gerechnet wird aus dem ersten Stabende am Knoten ohne N-/Q-Gelenk: `U = u·t + w·n` mit `t = (dx, dy)/L`, `n = (−dy, dx)/L` an `x = 0` bzw. `x = L`; hängen alle Stäbe über N-/Q-Gelenke am Knoten, werden die Knotenunbekannten `ux(K)`, `uy(K)` des LGS genommen. `phi = −w'` am ersten Stabende ohne M-Gelenk (starr: `κT·x − c3`); gibt es keins (Vollgelenk), bleibt `phi_k<i>` leer. Die gelbe Box („Knoten i: Verschiebung“) zeigt die drei Werte (gekürzt auf 40 Zeichen).
+
+Das Rand-LGS wird dabei nur neu gelöst, wenn sich das System geändert hat: `randErgebnis` hält die Linien je Stab und die Referenzenden je Knoten zusammen mit einem Schlüssel (`randLGSCacheSchluessel`: Fingerabdruck aller Eingaben einschließlich Knoten- und Stabnummern, `randStarrDirekt`, symbolischer Modus mit Referenzlänge, KGV-Zustand, Zahlenformat, CAS-Toleranz). Gleicher Fingerabdruck heißt gleiches System: Ein gelöschter und identisch (mit denselben Nummern) neu gebauter Knoten oder ein erneut geöffnetes gleiches System löst kein neues LGS aus. Neu rechnen mit `B` ohne Änderung behält den Speicher. Bei geändertem System löscht das nächste Rand-LGS auch die alten `ux_k*`, `uy_k*`, `phi_k*`. Getestet in `Emulator/tests/verschiebung.lua` (Kragarm, Stiel, schräger Stab, Q-Gelenk-Knoten, starrer Stab auf Feder direkt/Grenzwert, Vollgelenk, symbolisch, Speicher).
 
 **Temperatur symbolisch:** $T_{oben}$, $T_{unten}$, $\alpha_T$ und $h$ (Stabmenü, Seite 3) dürfen Symbole enthalten (z. B. `dt`, `t1`, `a`); das Menü zeigt den eingegebenen Text. Das Rand-LGS rechnet mit $\varepsilon_T = \alpha_T (T_o+T_u)/2$ und $\kappa_T = \alpha_T (T_u-T_o)/h$ exakt symbolisch. $h = 0$ bedeutet „kein Gradient“; eine gleichmäßige Erwärmung ($T_o = T_u$) braucht keine Höhe. Der Name `t` (auch `T`, der Rechner unterscheidet nicht) ist als Integrationsvariable reserviert, also z. B. `dt` verwenden; griechische Buchstaben werden nicht als Symbol erkannt (`a` statt `α`). Die symbolischen Diagrammbeschriftungen (Superposition) enthalten den Temperaturanteil nicht; darauf weist eine gelbe Box hin (ESC schließt sie, sie erscheint erst bei geänderten Temperatureingaben wieder).
 
@@ -166,6 +203,8 @@ Unterstützt werden:
 - globale Linienlast $g_y(x)$,
 - trapezförmige Anfangs- und Endwerte für $q$ und $n$,
 - temperaturähnliche oder vorgegebene Dehnungs- und Krümmungsanteile über $T_{oben}$, $T_{unten}$, $\alpha_t$ und $h$.
+
+Alle Stablasten gelten auch auf Bögen (siehe 2.3): `q` radial, `n` tangential, `x` in Lastfunktionen ist dort der Winkel ab Stabanfang.
 
 Alle numerischen Eingabefelder akzeptieren mathematische Ausdrücke mit Dezimalkomma, Klammern, `+`, `-`, `*`, `/` und `^`; außerdem sind TI-Nspire-CAS-Funktionen wie `sqrt(...)` oder `sin(...)` möglich. Funktionale Eingaben können Variablen wie `x` enthalten. Wenn eine symbolische Eingabe erkannt wird, wechselt das Programm in den symbolischen Modus und versucht, die zugehörigen CAS-Ausdrücke zu erzeugen.
 
@@ -247,6 +286,15 @@ Symbolische Knotenfedersteifigkeiten `cx`, `cy` und `cm` werden beim Berechnungs
 - Die Verschiebungsdarstellung ist zur Sichtbarkeit skaliert und nicht automatisch maßstäblich zur Geometrie.
 - Die direkte Fortsetzung am inneren Gelenk setzt eine korrekt gelöste lokale Verschiebung und Verdrehung am Gelenkende voraus.
 
+### 6.x Globale Linienlasten mit x
+
+`p_X(x)`, `p_Y(x)` (Stabmenü Seite 2) dürfen von `x` abhängen (nur im Zahlenmodus). Projiziert läuft `x`
+entlang der globalen Achse ab dem Stabanfang (`p_Y` waagerecht 0…|Δx|, `p_X` senkrecht 0…|Δy|), sonst
+entlang der Stabachse 0…L (`globaleLinienlast`). Die FEM rechnet sie über den CAS-Pfad (früher fehlte die
+Last, wenn nur sie von x abhing), ebenso Zeichnung, Resultierende, Arbeitssatz, Rand-LGS und LGS-Export.
+Getestet in `Emulator/tests/globallast.lua`. Auf einem Bogen ist `x` auch hier der Winkel ab Stabanfang
+(auch projiziert), siehe 2.3.
+
 ## 7. Explosion und Detailansichten
 
 Mit `e` wird die Explosionsansicht geöffnet. Sie stellt Stabendgrößen und lokale Freiheitsgrade getrennt dar. Über `e` kann zwischen den Explosionsseiten gewechselt werden; `t` blendet die Detailbeschriftungen um.
@@ -258,6 +306,28 @@ In der Explosion werden unter anderem dargestellt:
 - lokale Verschiebungen und Rotationen,
 - Lastangriff und Reaktionsbeiträge,
 - symbolische Bezeichnungen, wenn der symbolische Modus aktiv ist.
+
+### 7.0 Seite 2 und LGS-Export
+
+Seite 2 zeigt den Freischnitt als Ansatz: jede unbekannte Kraft mit Namen in ihrer **positiven** Richtung,
+Momente mit festem positivem Drehsinn (Lager gegen den Uhrzeigersinn, Gelenkmomente wie positive
+Schnittmomente). Der Export `LGS-Matrix` stellt genau zu diesem Bild die Handrechnung auf (je Teilsystem
+Kräfte nach rechts, nach oben, Momente gegen den Uhrzeigersinn um P), mit denselben Namen und Richtungen;
+die Lösung trifft die Werte von Seite 1. Gemeinsame Regeln im Code: `gelenkKnoten`, `gelenkRichtung`,
+`lastStabKnoten`.
+
+- Lager: `A_h` in Lagerrichtung ξ, `A_v` nach oben (−η), `M_A` gegen den Uhrzeigersinn; Buchstaben nach
+  `getSuppLetter` (Reihenfolge der Lager, Federn zählen mit), auch an Gelenkknoten.
+- Gelenke: am ersten Gelenkstab wie positive Schnittgrößen (Stabanfang −, Stabende +), Gegenseite
+  entgegengesetzt – auch beim Vollgelenk, an dem zwei Stäbe mit dem Anfang hängen. Mehr als zwei
+  Teilsysteme: je Gelenkstab eigene Größen (Suffix `s<TS>`), ohne biegesteifen Rest mit Gelenkbolzen.
+  Hängt nur ein Stab am Gelenk, gibt es keine Gelenkgrößen.
+- Lasten und Lager eines Gelenkknotens hängen am ersten Stab mit Gelenk dort; Knotenlasten mit ihrem
+  Wert (früher stand dort die Koordinate) und um den Lastwinkel gedreht.
+- Symbolischer Modus: das LGS steht symbolisch (Lastnamen, Längen als Vielfache von l).
+- Fachwerk: Knotenschnittverfahren mit `S_i` (Zug positiv), Seite 2 beschriftet `S_i`.
+- Geprüft in `Emulator/tests/lgs_seite2.lua`: Seite 2 wird beim Zeichnen protokolliert (`E2_PROTOKOLL`),
+  jede Unbekannte muss dort mit Name und Richtung stehen, und die LGS-Lösung muss die FEM treffen.
 
 ### 7.1 Streckenlasten als Resultierende
 
@@ -276,6 +346,14 @@ gespeicherten Stützwerte mit der Simpson-Regel integriert – für lineare und 
 ist das exakt –, sonst gilt die Trapezformel aus den Endwerten plus dem im PvV vorbereiteten
 CAS-Anteil.
 
+**Bögen:** Je Lastart eine Resultierende in ihrer tatsächlichen Richtung (nicht quer zur Sehne), aus den
+Teilstablasten wie in der FEM (`bogenLastResultierende`, zwischengespeichert in `s.bogen_res` durch
+`updateAlleLasten`). Der Fußpunkt liegt dort, wo die Wirkungslinie den Bogen schneidet, sonst am Lot von der
+Bogenmitte (`bogenWirkungspunkt`); ein Streckenmoment wird zum Momentensymbol in Bogenmitte. Beispiel:
+konstante radiale Last auf dem Viertelkreis, Resultierende $q\cdot$Sehne durch Mittelpunkt und Bogenmitte.
+Im LGS-Export geht die Summe aller Bogenlasten als Kraft am Stabanfang plus Moment um ihn ein (gleichwertig
+für das Gleichgewicht des Teilsystems).
+
 Die **Wirkungslinien werden bemaßt**: Die Angriffspunkte kommen zusammen mit den Knoten in die
 globale Maßkette, sodass der Hebelarm direkt ablesbar ist. Das passiert auf der E-Seite
 unabhängig vom Schalter *Bemaßung* im Obermenü, weil die Resultierende ohne ihre Lage nichts
@@ -293,6 +371,10 @@ Mit `p` wird der Polplan geöffnet. Er zeigt Starrkörperbereiche, Pole und Pols
 
 Der Polplan unterstützt die qualitative Untersuchung von Bewegungszuständen und Scheibenrotationen. Rotierende Scheiben werden um ihre momentanen Pole visualisiert.
 
+Gedrehte Rollenlager wirken im Polplan in derselben Richtung wie in der Berechnung und in der Zeichnung
+(Lagerwinkel gegen den Uhrzeigersinn). Früher drehte der Polplan sie andersherum; bei Winkeln, die kein
+Vielfaches von 90° sind, lag der Pol dadurch auf der falschen Geraden.
+
 ### 8.3 Prinzip der virtuellen Verschiebungen
 
 Ist ein System starr, kann mit `Enter` der PvV-Modus gestartet werden. Danach kann ein Knoten oder Stab ausgewählt und eine Bindung temporär gelöst werden:
@@ -301,12 +383,62 @@ Ist ein System starr, kann mit `Enter` der PvV-Modus gestartet werden. Danach ka
 - Knoten-Gelenk bei geeigneten Knoten,
 - M-, N- oder Q-Gelenk an einem Stabende.
 
-Das System wird mit der gelösten Bindung als virtueller Bewegungszustand untersucht. Angezeigt werden Verschiebungen, Rotationen, Arbeitsanteile $W_i$ und bei Gelenklösungen Klaffungen beziehungsweise relative Bewegungen.
+Das System wird mit der gelösten Bindung als virtueller Bewegungszustand untersucht. Zeichnung und Menüs benutzen **dieselben Namen und Werte wie der Export** (8.4), sie kommen aus derselben Rechnung:
+
+- An jedem Weg steht `Name = Wert` wie Spalte 3 von `pvv_kin`: Knotenlasten `δ_k<i>x`/`δ_k<i>y` (Pfeil in Lastrichtung, bei gedrehtem Lastsystem mitgedreht), Streckenlasten `δ_s<i>q`/`n`/`x`/`y`, gelöstes Lager `δ_H`/`δ_V`, gelöstes N-/Q-Gelenk `δ_G`, gelöstes Momentengelenk `φ_G`.
+- Drehbögen der Scheiben: `φ_i = Faktor*φ_0`, Bezugsscheibe `φ_i = φ_0`; nur verschobene Scheiben `δ_i = …` an ihrem ersten Stab. Das gelöste Einspannmoment heißt `M_A`.
+- Knoten- und Stabmenü im PvV-Modus: Wege (wie `pvv_kin`), Drehwinkel der beteiligten Scheiben und die Arbeitsanteile, also die Terme von `w_eq1`, die zu diesem Knoten bzw. Stab gehören.
+- Nicht glatte Werte stehen in der Zeichnung auf vier Stellen gerundet, im Export als Zahl bzw. Bruch.
 
 Die ursprünglichen Bindungen werden gesichert und beim Beenden wiederhergestellt.
 
+### 8.4 Arbeitssatz exportieren (`w_eq1`, `pvv_kin`, `pvv_pol`, `w_eq2`, `pvvinfo`)
+
+Der Menüpunkt *Arbeitssatz* schreibt die Gleichung $\sum F\,\delta + \sum M\,\varphi = 0$ in drei Ebenen ins CAS:
+
+- `w_eq1`: reines Kraft mal Weg, jede Kraft mal ihr Weg (positiv in Richtung der eingegebenen
+  Kraft), jedes Moment mal den Drehwinkel `φ_i` seiner Scheibe. Namen: `δ_k3x`/`δ_k3y` (Knoten 3,
+  x- bzw. y-Last), `δ_s2q`/`δ_s2n`/`δ_s2x`/`δ_s2y` (Resultierende der Quer-, Längs- bzw. globalen
+  Linienlast von Stab 2), `δ_H`, `δ_V` (gelöstes Lager), `φ_G`/`δ_G` (gelöstes Gelenk, gegenseitige
+  Verdrehung bzw. Verschiebung). Lasten auf Scheiben, die sich nicht bewegen, fehlen.
+- `pvv_kin` (Matrix): Weg | durch die eigene Scheibe (`hebel*φ_i` bzw. `Richtungskosinus*δ_i`) |
+  durch `φ_0` (bzw. `δ_0`); darunter je bewegter Scheibe `φ_i | φ_i | Faktor*φ_0`.
+- `pvv_pol` (Matrix): je Nebenpol zweier bewegter Scheiben (`polplan.poles[A][B]`, erster Pol)
+  dieselbe Bewegung über beide Scheiben: endlich `δx_PAB` bzw. `δy_PAB` (die größere Komponente der
+  Bewegung, y nach unten), im Unendlichen `φ_PAB | φ_A | φ_B` (gleiche Drehung) bzw. `δ_PAB` (zwei
+  verschobene Scheiben, Komponente in Polrichtung).
+- `w_eq2` drückt alles durch `φ_0` (bzw. `δ_0`) aus; nach der freigesetzten Größe aufgelöst ist das
+  direkt das Ergebnis. Spalte 3 von `pvv_kin` in `w_eq1` eingesetzt ergibt `w_eq2`.
+- `pvvinfo`: Legende aller Namen.
+- **Vorzeichen:** Drehwinkel und Momente zählen gegen den Uhrzeigersinn positiv. Die freigesetzte
+  Größe wirkt so, wie der PvV-Modus sie zeichnet: `H` und `V` in Lagerrichtung (ungedreht: `H` nach
+  rechts, `V` nach unten; bei gedrehtem Lager mitgedreht), `M_A` gegen den Uhrzeigersinn (= das
+  Einspannmoment der Berechnung), `M`, `N`, `Q` an Gelenken als **positive Schnittgrößen** – also mit
+  demselben Vorzeichen wie in den Verläufen. Beim Knotengelenk gilt das Schnittmoment des ersten
+  Stabes am Knoten.
+- **Symbolischer Modus:** Knotenlasten stehen mit ihren Namen in der Gleichung (`F1`, `-F2`, …),
+  Hebelarme als Vielfache des Längensymbols (`l` = Rasterabstand bzw. das Symbol der Geometrie, z. B.
+  `a`). Schräge Lasten (Lastwinkel) werden wie in der Berechnung gegen den Uhrzeigersinn gedreht und
+  als exakte Faktoren (z. B. $\sqrt{2}/2$) geschrieben – ohne `cos`/`sin`, damit der Winkelmodus des
+  Rechners keine Rolle spielt.
+- Lasten an einem Knoten mit N- oder Q-Gelenk gehören zu dem Stab **ohne** Gelenk an diesem Knoten
+  (steht der fest, leisten sie keine Arbeit).
+- **Bögen:** Alle Lasten eines Bogens zusammen wirken als ihre Resultierende auf der Wirkungslinie (auf der
+  starren Scheibe dieselbe Arbeit), mit den Wegen `δ_s<i>x` und `δ_s<i>y`; die PvV-Ansicht zeichnet sie
+  dort (`zeichneBogenPvv`). Ohne resultierende Kraft (nur Streckenmoment) bleibt ein Moment auf `φ_i`.
+
+Geprüft wird das in `Emulator/tests/arbeitssatz.lua`: Für jede Löseart (H, V, M_A, Knotengelenk,
+M-/N-/Q-Gelenk an Anfang und Ende, gedrehtes Lager, reine Verschiebung) muss die aus `w_eq2` und die
+aus `w_eq1` mit `pvv_kin` (Spalte 3) bestimmte Größe mit der Auflagerreaktion bzw. Schnittgröße der
+FEM-Rechnung übereinstimmen; zusätzlich passt in `pvv_kin` Spalte 2 zu Spalte 3 und in `pvv_pol`
+liefern beide Scheiben dieselbe Bewegung. Außerdem steht jede Zeile von `pvv_kin` als `Name = Wert` in
+der gezeichneten PvV-Ansicht (Wert gleich Spalte 3), die Ansicht beschriftet keinen Namen, den der
+Export nicht kennt, und jeder Weg steht im Menü seines Knotens bzw. Stabes.
+
 **Grenzen:**
 
+- Streckenlasten, die von `x` abhängen, gehen im symbolischen Modus noch als konstante Last in den
+  Arbeitssatz ein (im Zahlenmodus werden sie integriert).
 - Der PvV-Modus ist eine qualitative und rechnerisch unterstützte Untersuchung einzelner gelöster Bindungen.
 - Nur zulässige Bindungen können gelöst werden; ungeeignete Kombinationen werden zurückgewiesen.
 - Die animierte Darstellung ist skaliert und stellt keine maßstäbliche reale Zeit- oder Verformungsbewegung dar.
@@ -333,11 +465,12 @@ Erkannte Nullstäbe werden für die Darstellung markiert. Der Algorithmus wieder
 - Arbeitssatzdaten,
 - Schnittkraftfunktionen,
 - globale LGS-Matrix,
-- Verformungslinien aus dem Rand-LGS (`wneu_i`, `uneu_i`, `randbed`).
+- Verformungslinien aus dem Rand-LGS (`wneu_i`, `uneu_i`, `randbed`),
+- Knotenverschiebungen aus dem Rand-LGS (`ux_k<i>`, `uy_k<i>`, `phi_k<i>`; Knotenmenü Seite 4, Zeile 1).
 
 Typische gespeicherte Variablen sind `sys_k`, `sys_f`, `sys_u`, `ggw_a`, `ggw_b`, `ggw_x`, `ggw_eqs` sowie stabspezifische Matrizen und Funktionen.
 
-Für gerade Stäbe können analytische CAS-Funktionen für $N(x)$, $Q(x)$, $M(x)$, $v(x)$ und $u(x)$ erzeugt werden. Funktionale Lasten werden nach Möglichkeit als Integrale exportiert. Für Bögen existieren winkelabhängige Schnittkraftfunktionen.
+Für gerade Stäbe können analytische CAS-Funktionen für $N(x)$, $Q(x)$, $M(x)$, $v(x)$ und $u(x)$ erzeugt werden. Funktionale Lasten werden nach Möglichkeit als Integrale exportiert. Für Bögen gibt es winkelabhängige Schnittkraftfunktionen `N_bogen_i(p)`, `q_bogen_i(p)`, `M_bogen_i(p)` (p = Winkel ab Stabanfang, im Winkelmodus des Rechners); sie kommen mit *Nur Schnittgrößen* und *Alles exportieren*, die Meldung nennt den Winkelbereich je Bogen. Sie bauen auf den Kräften am Bogenanfang aus der FEM auf. Trägt der Bogen Lasten, kommt der Anteil der Last auf dem Bogenstück 0…p als Integral dazu (`bogenExportLast`, Gleichgewicht am exakten Kreisbogen, Integrationsvariable `t`, Bogenlänge $ds = R/u\,dt$ mit $u$ Winkeleinheiten je rad). Lastfunktionen mit `x` gehen mit `x = t` ein, projizierte Linienlasten mit $|\sin\vartheta|$ bzw. $|\cos\vartheta|$ der Tangente (`abs` nur, wenn das Vorzeichen im Bogen wechselt). Bei konstanter radialer Last ist das Ergebnis exakt, sonst trägt es den Teilungsfehler der Anfangswerte (bei 100 Teilen um 1e-4). *Nur Biegelinien* und *Nur Längslinien* lassen Bögen aus. Ob das System berechnet ist, prüfen die Exporte an allen Stäben (`exportBereit`), ein Bogen als Stab 1 blockiert also nichts mehr.
 
 **Grenzen:**
 
@@ -368,7 +501,7 @@ Für gerade Stäbe können analytische CAS-Funktionen für $N(x)$, $Q(x)$, $M(x)
 - **Gelbe Hinweisbox** (nach der Berechnung, das Ergebnis ist gültig; ESC schließt sie, sie erscheint wieder, sobald sich am System etwas ändert, z. B. eine Steifigkeit, Last, Lagerung oder ein Gelenk; erneutes Rechnen ohne Änderung öffnet sie nicht):
   - Temperatur mit $T_o \ne T_u$, aber $h = 0$: Es wirkt nur die mittlere Erwärmung $(T_o+T_u)/2$, keine Krümmung.
   - Temperatur im symbolischen Modus: Die Diagrammbeschriftungen enthalten den Temperaturanteil nicht, der Export schon.
-  - Symbolischer Modus: Ein Stab hat ein Zahlen-EI (bzw. -EA), während andere Steifigkeiten symbolisch sind, und wird laut FEM tatsächlich auf Biegung (bzw. Normalkraft) beansprucht. Das Ergebnis mischt dann Zahl und Symbol (z. B. `3·l²·ea + 125000000`, wobei 125000000 aus EI = 10⁸ stammt). Abhilfe: Pendelstab mit Gelenken an beiden Enden, EI/EA symbolisch, biegesteif/dehnsteif bzw. Standard-EA dehnstarr.
+  - Symbolischer Modus: Ein Stab hat ein Zahlen-EI (bzw. -EA) und wird laut FEM tatsächlich auf Biegung (bzw. Normalkraft) beansprucht, und auch eine symbolische Steifigkeit wirkt tatsächlich mit (gebogener Stab mit symbolischem EI, Stab mit N ≠ 0 und symbolischem EA, symbolische Feder an einem bewegten Knoten, EI/EA in einem Lasttext). Symbolische Steifigkeiten von Stäben ohne Biegung bzw. Normalkraft zählen nicht, die Lösung hängt nicht von ihnen ab. Das Ergebnis mischt dann Zahl und Symbol (z. B. `3·l²·ea + 125000000`, wobei 125000000 aus EI = 10⁸ stammt). Abhilfe: Pendelstab mit Gelenken an beiden Enden, EI/EA symbolisch, biegesteif/dehnsteif bzw. Standard-EA dehnstarr.
 - `Clear`: alles löschen. Vorher erscheint die Rückfrage **„Wirklich alles loeschen?“** – `Enter` löscht, `Esc` bricht ab (bei leerem System entfällt die Rückfrage).
 - Alle Menüs (Obermenü, Knoten- und Stabmenü, PvV-Menüs) stehen am **linken** Bildschirmrand.
 - `Esc`: Eingabe, Menü oder Sondermodus abbrechen. Warnhinweise („System ist kinematisch!“, „Starrmodus & statisch unbestimmt!“, Hinweisbox, „Symbolischer Modus nicht möglich“) schließt ein `Esc`, sofern kein Menü und keine Eingabe darüber liegt; eine neue Berechnung zeigt sie wieder. Beim symbolischen Modus bleibt die Sperre bestehen (Rand-LGS-Export bricht weiter ab), nur die Box verschwindet.
@@ -381,8 +514,10 @@ Die Einstellungen sind in mehrere Seiten aufgeteilt:
 
 1. Raster und Standardwerte für $EA$ und $EI$, Starrmodus, Auto-KGV, Anzeige von $n$, Schnittgrößenmodus und Fachwerkmodus.
 2. Exporte zum TI-Nspire-CAS.
-3. CAS-Toleranz, Punkte pro Stab, Zoomschritte, Bogenauflösung, Bemaßung, Zahlenformat und Maximalwerte.
-4. Polstrahlmodus und Verlaufsskalierung.
+3. CAS-Toleranz, Punkte pro Stab, Zoomschritte, Bogenauflösung, Bemaßung, Zahlenformat, Maximalwerte und Rasterpunkte (Zeile 9, Enter schaltet `rasterPunkte` 1 Normal → 2 Dick → 0 Keine: 1×1- bzw. 2×2-Pixel oder gar keine Punkte; das Fangen am Raster bleibt).
+4. Polstrahlmodus, Verlaufsskalierung, Standard-EA dehnstarr, Methode für starre Stäbe (Export), System speichern als / System öffnen (siehe 2.4), Variablen löschen (Zeile 7: erstes Enter zeigt „Sicher? Enter“, das zweite ruft `loescheSkriptVariablen()` auf; Pfeiltaste oder Esc verwerfen die Nachfrage). Gelöscht werden alle Namen aus `SKRIPT_VARIABLEN` (feste Namen wie `randbed`, `lgs`, `kgv_delta` und nummerierte wie `wneu#`, `stab#_k`, `ux_k#`) bis max(30, Stab-/Knotenzahl), mit `var.list` zusätzlich alle passenden Reste im Dokument; `system<Nr>` und eigene Variablen nie. Danach ist `randErgebnis` leer, das nächste Rand-LGS rechnet neu.
+
+**Biegelinie/Längslinie zeichnen:** Werte werden zur Rauschunterdrückung erst unter 1e-12 m auf null gesetzt (Kräfte unter 1e-5). Früher galt auch hier 1e-5 m = 0,01 mm, dadurch fehlte bei kleinen Verformungen ein Stück der Linie bzw. die ganze Linie. Die verbleibenden Pixeltreppen flacher Linien kommen vom Display (keine Kantenglättung).
 
 ## 12. Bekannte Grenzen und fachliche Hinweise
 
@@ -425,21 +560,29 @@ Gründe für „Symbolischer Modus nicht möglich“:
 |---|---|---|
 | Stab i: To und Tu verschieden, aber h = 0 | h = 0 und To ≠ Tu | Sonst wirkt stillschweigend nur die mittlere Erwärmung (To+Tu)/2, ohne Krümmung |
 | Temperatur symbolisch: Diagrammwerte ohne Temperaturanteil | Symbolischer Modus mit Temperatur | Die Diagrammbeschriftungen entstehen durch Superposition; der Temperaturanteil fehlt dort, im Export nicht |
-| Stab i wird auf Biegung belastet, EI ist dort eine Zahl … | Symbolischer Modus: der Stab wird tatsächlich gebogen (Schnittgrößen ≠ 0, kein Pendelstab), EI numerisch, andere Steifigkeiten symbolisch | Nur dann beeinflusst der Zahlenwert das Ergebnis. Der Text nennt die Folge: statisch bestimmt → nur Biegelinie und Export mischen Zahl und Symbol; statisch unbestimmt → auch die Schnittgrößen können verfälscht sein (Symbole rechnen intern mit 1) |
+| Stab i wird auf Biegung belastet, EI ist dort eine Zahl … | Symbolischer Modus: der Stab wird tatsächlich gebogen (Schnittgrößen ≠ 0, kein Pendelstab), EI numerisch, und eine symbolische Steifigkeit wirkt ebenfalls mit (siehe oben) | Nur dann beeinflusst der Zahlenwert das Ergebnis. Der Text nennt die Folge: statisch bestimmt → nur Biegelinie und Export mischen Zahl und Symbol; statisch unbestimmt → auch die Schnittgrößen können verfälscht sein (Symbole rechnen intern mit 1) |
 | Stab i trägt Normalkraft, EA ist dort eine Zahl … | wie oben mit N ≠ 0 und numerischem EA | wie oben; Abhilfe: dehnsteif bzw. Standard-EA dehnstarr oder EA symbolisch |
+| Stab i (Bogen): Lastfunktion q, … nicht auswertbar (x = Winkel ab Stabanfang im Winkelmodus). Dort mit 0 gerechnet. | Das CAS liefert für eine Lastfunktion auf einem Bogen an einem Teilungspunkt keine Zahl (z. B. Division durch null) | Sonst fehlte die Last still; `x` ist auf Bögen der Winkel, nicht die Länge (2.3) |
+
+**Lange gelbe Boxen:** Passt der Text nicht auf den Bildschirm, zeigt die Box einen Ausschnitt. Pfeil hoch/runter blättert zeilenweise, oben rechts steht der Zeilenzähler (`a-b/n`), kleine Dreiecke am rechten Rand zeigen weiteren Text oben bzw. unten. Neuer Inhalt beginnt oben.
 
 ### 13.3 Export- und Rand-LGS-Meldungen (gelbe Box, Titel „Export“ bzw. „Export fehlgeschlagen“)
 
 | Meldung | Wann |
 |---|---|
-| Rand-LGS: n Stäbe, m Bedingungen → wneu_i, uneu_i, wv_i, uv_i, randbed | Erfolgreicher Rand-LGS-Export |
+| Rand-LGS: n Stäbe, m Bedingungen → wneu_i, uneu_i, wv_i, uv_i, randbed, bei starren Stäben mit Zusatz „Starr: wneu=w bei Stab …, uneu=u bei Stab … (siehe randinfo)“ | Erfolgreicher Rand-LGS-Export; der Zusatz nennt die Stäbe, bei denen `wneu`/`uneu` die Verschiebung selbst ist (direkte Methode bzw. bewegter starrer Stab) |
 | Matrizen/Schnittgrößen/Biegelinien/Längslinien/Verschiebungslinien/KGV-Matrizen exportiert | Erfolgreicher Export aus dem Obermenü, Seite 2 |
 | LGS exportiert (ggw_a, ggw_b, ggw_x, lgs), ggf. mit „LGS nicht quadratisch“ | Export der Gleichgewichtsmatrix; die Warnung zeigt ungleiche Anzahl Gleichungen und Unbekannte |
-| Arbeitssatz exportiert: w_eq1, w_eq2 | Erfolgreicher Arbeitssatz-Export (PvV) |
+| Arbeitssatz exportiert: w_eq1, w_eq2, pvv_kin, pvv_pol, pvvinfo | Erfolgreicher Arbeitssatz-Export (PvV); `pvv_pol` nur, wenn es Nebenpole zwischen bewegten Scheiben gibt |
 | Bitte zuerst das System berechnen (Taste B) | Export ohne vorherige Berechnung |
 | KGV-Export: KGV nicht aktiv oder System statisch bestimmt | KGV-Export ohne Einheitszustände |
 | Arbeitssatz: bitte zuerst in den PvV-Modus wechseln | Arbeitssatz-Export außerhalb des PvV-Modus |
 | Dieser Export erfordert das CAS | Kein CAS verfügbar |
+| ux_k<i> = …, uy_k<i> = …, phi_k<i> = … (Titel „Knoten i: Verschiebung“) | Knotenverschiebung exportiert; „Gelenk: keine Knotenverdrehung“ statt phi am Vollgelenk |
+| Knoten i hängt an keinem Stab | Knotenverschiebung eines freien Knotens |
+| System als system<n> gespeichert / system<n> geöffnet: … Knoten, … Stäbe | Obermenü Seite 4, Zeile 5 bzw. 6 |
+| system<n> ist nicht vorhanden / keine gespeicherte Tragwerksdatei | Öffnen einer leeren bzw. fremden Variable |
+| Kein System vorhanden / Bitte eine ganze Zahl eingeben | Leeres System speichern bzw. Eingabe ist keine ganze Zahl |
 
 Fehler des Rand-LGS stehen zusätzlich auf dem Rechner in `randbed = ["Fehler: …"]`; die alten Funktionen `wneu`, `uneu`, `wv`, `uv` werden vorher gelöscht:
 

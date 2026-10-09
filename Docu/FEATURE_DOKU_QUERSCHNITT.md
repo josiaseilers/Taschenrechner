@@ -37,7 +37,7 @@ Diese Datei dokumentiert alle funktionalen Features des Programms, ihre Möglich
 
 ## 2. Dünnwandige Profile (Menü: D)
 **Möglichkeiten:**
-- Zeichnen von dünnwandigen Segmenten: Linienzüge (n Klicks), Kreise (2) und Kreisbögen (3).
+- Zeichnen von dünnwandigen Segmenten: Linienzüge (n Klicks), Kreise (2) und Kreisbögen (3). Kreise und Bögen sind Mittellinie mal Standarddicke ($A = 2\pi R t$ beim Vollkreis, $I = \pi R^3 t$); früher landeten sie bei den massiven Elementen (voller Kreis bzw. Bogen mit Fläche 0). Ein einzelner dünnwandiger Kreis ist ein Kreisrohr: Torsion nach Bredt ($I_T = 2\pi R^3 t$), Schubmittelpunkt im Mittelpunkt. Freie Bögen gehen in die offene Torsion ein; Bögen, die an andere Elemente anschließen, lehnt die Torsion ab (mögliche Zelle). Schub und Verwölbung bleiben auf gerade Elemente beschränkt.
 - Jedes Element erhält eine definierte Standarddicke $t$, die sich jederzeit global oder pro Element anpassen lässt.
 - Ein Linienzug wird intern in einzelne Zwei-Punkt-Kanten zerlegt.
 - Gemeinsame Punkte bleiben als topologisch verbundene Knoten erhalten; dadurch können Verzweigungen, T-Stöße und geschlossene Umläufe erkannt werden.
@@ -79,9 +79,21 @@ mit Pfeil links/rechts auf Seite 3 „Querschnittswerte“) diese Punkte:
 
 1. `A setzen`, 2. `I_y,S setzen`, 3. `I_z,S setzen`, 4. `I_yz,S setzen` – jeweils mit dem aktuellen
    Wert und dem Zusatz „manuell“, wenn er überschrieben ist; Eingabe im angezeigten KOS, in der
-   eingestellten Längeneinheit, bezogen auf den **Schwerpunkt** (die Lage des Schwerpunkts bleibt
-   die aus der Geometrie),
-5. `Berechnete Werte wiederherstellen`, 6. `< Zurueck`.
+   eingestellten Längeneinheit, bezogen auf den **Schwerpunkt**,
+5. `y_S setzen`, 6. `z_S setzen` – Lage des Schwerpunkts im angezeigten KOS und in der
+   Längeneinheit; die jeweils andere Koordinate bleibt stehen,
+7. `Berechnete Werte wiederherstellen`, 8. `< Zurueck`.
+
+**Schwerpunkt (5, 6):** Gedacht für Aufgaben, die den Schwerpunkt anders angeben als die Skizze
+(z. B. 2 cm statt der geometrischen 5/3 cm). Der gesetzte Schwerpunkt gilt für die Hebel der
+Normalkräfte („M_y aus Normalkraeften“), σx samt Gleichungen und neutraler Faser, Kernfläche und die
+Widerstandsmomente (Randabstände vom neuen Schwerpunkt). Schub, Schubmittelpunkt, Verwölbung und die
+Einzelwerte-Tabelle bleiben beim Schwerpunkt der Geometrie, weil sie über die gezeichneten Wände
+integrieren und das statische Moment nur um deren eigenen Schwerpunkt verschwindet. Die
+Trägheitsmomente werden **nicht** per Steiner verschoben; gibt die Aufgabe einen anderen
+Schwerpunkt vor, setzt man $I_y$, $I_z$ aus der Aufgabe mit. Gespeichert wird der Schwerpunkt
+relativ zum ersten Punkt der Geometrie, er bleibt also beim KOS-Verschieben an derselben Stelle
+des Querschnitts.
 
 **Wirkung:** Die Werte ersetzen am Ende jeder Neuberechnung (`berechneSystem`) die berechneten, und
 alles Abgeleitete wird daraus neu gebildet: $I_1$, $I_2$, Hauptachsenwinkel, Widerstandsmomente,
@@ -120,8 +132,8 @@ wäre der Querschnitt nicht biegesteif); andernfalls wird die Eingabe mit Begrü
 - Grafische Visualisierung der Spannungsverteilung als farbige Verlaufsschicht (Isolinien) direkt über dem Querschnitt.
 - Darstellung der Nullspannungsgerade.
 - Ausgabe einer Ergebnistabelle mit Minimal- und Maximalspannungen.
-- Manuelle Eingabe von $N$, $M_y$, optional $M_z$ und – bei eingezeichneten Querkräften – $\Delta x$ über eine mehrstufige Eingabemaske.
-- Direkte Berechnung ausschließlich aus den platzierten Kräften über die Option "σx aus Kräften".
+- Eine Eingabemaske: Berechnungsmenü → „σx-Berechnung“ fragt nacheinander $N$, $M_y$, $M_z$ und – bei eingezeichneten Querkräften – $\Delta x$ ab (kein Untermenü; gerade Biegung mit $M_z = 0$).
+- Platzierte Kräfte werden immer zu den Eingaben addiert; σx nur aus den Kräften: $N$, $M_y$, $M_z$ mit 0 bestätigen.
 - Berücksichtigung des Deviationsmoments $I_{yz}$ bei schiefer Biegung.
 - Anzeige der verwendeten manuellen und aus Kräften resultierenden Schnittgrößen getrennt in der Ergebnistabelle.
 - **Erweiterte Ergebnistabelle** (mit den Pfeiltasten hoch/runter scrollbar, begrenzt auf den Inhalt; der frühere $\sigma_x$-Verlauf über $z$ unter der Tabelle ist entfallen – die Verteilung zeigt die farbige Darstellung auf dem Querschnitt). Die Wertespalte beginnt hinter der breitesten Beschriftung, solange die breitesten Werte daneben passen; was dann noch zu breit ist, wird in Schrift 7 bzw. 6 gesetzt (Test 40 scrollt durch die ganze Tabelle und prüft, dass nichts überlappt oder über den Rand ragt):
@@ -129,7 +141,7 @@ wäre der Querschnitt nicht biegesteif); andernfalls wird die Eingabe mit Begrü
   - **Biegenormalspannung in MPa** als lineare Gleichung im angezeigten KOS, $\sigma_x = c_0 + c_y\,y + c_z\,z$ ($y, z$ vom KOS-Ursprung in der aktuellen Längeneinheit; liegt der Ursprung nicht im Schwerpunkt, steht $y_S, z_S$ darunter), und im HAS, $\sigma_x = N/A + c_\eta\,\eta + c_\zeta\,\zeta$ mit dem Hinweis auf die Form $N/A + (M_\eta/I_\eta)\zeta - (M_\zeta/I_\zeta)\eta$.
   - **Neutrale Faser** ($\sigma_x = 0$) in beiden Systemen als $z = m\,y + n$ bzw. $\zeta = m\,\eta + n$ (bei senkrechter Faser $y = n$ bzw. $\eta = n$; ohne Biegung „keine“).
   - Grundlage ist dieselbe Spannungsebene, die auch Nulllinie und Extremwerte liefert; die HAS-Form entsteht durch Drehung des Gradienten. Test 37 prüft in allen vier KOS-Drehungen, dass die Koeffizienten mit $M_\eta/I_\eta$ und $-M_\zeta/I_\zeta$ übereinstimmen und die Gleichungen an den Extrempunkten $\sigma_{max}$ bzw. $\sigma_{min}$ liefern.
-- **Versatz entlang der Stabachse ($\Delta x$ im $yz$-KOS):** Haben eingezeichnete Kräfte eine Komponente in der Querschnittsebene (Querkräfte), fragt die Eingabemaske zusätzlich den Abstand $\Delta x$ zwischen dem betrachteten Schnitt und der Kraftebene ab (bei „σx aus Kräften“ nur diesen). Die Querkräfte erzeugen dann $M_y = -\Delta x\,F_z$ und $M_z = \Delta x\,F_y$, überlagert mit den eingegebenen Momenten und den Momenten der exzentrischen Normalkräfte. Das Ergebnis hängt nur vom **Abstand** ab, nicht davon, auf welcher Seite des Schnitts die Kräfte angreifen: für den positiven Teil gilt $\vec M = \vec r \times \vec F$ mit $r_x = +a$, für den negativen $\vec M = -\vec r \times \vec F$ mit $r_x = -a$ – der Querkraftanteil ist in beiden Fällen $M_y = -a F_z$, $M_z = a F_y$. Deshalb rechnet das Programm mit $|\Delta x|$; ein vorzeichenbehaftetes $x$ eingesetzt wäre auf einer Seite falsch. Die Ergebnistabelle zeigt $\Delta x$ und die Momente aus Querkräften in eigenen Zeilen. Die Maske passt mit vier Feldern und Hinweiszeile auf den Bildschirm.
+- **Versatz entlang der Stabachse ($\Delta x$ im $yz$-KOS):** Haben eingezeichnete Kräfte eine Komponente in der Querschnittsebene (Querkräfte), fragt die Eingabemaske zusätzlich den Abstand $\Delta x$ zwischen dem betrachteten Schnitt und der Kraftebene ab (als letztes Feld der Maske). Die Querkräfte erzeugen dann $M_y = -\Delta x\,F_z$ und $M_z = \Delta x\,F_y$, überlagert mit den eingegebenen Momenten und den Momenten der exzentrischen Normalkräfte. Das Ergebnis hängt nur vom **Abstand** ab, nicht davon, auf welcher Seite des Schnitts die Kräfte angreifen: für den positiven Teil gilt $\vec M = \vec r \times \vec F$ mit $r_x = +a$, für den negativen $\vec M = -\vec r \times \vec F$ mit $r_x = -a$ – der Querkraftanteil ist in beiden Fällen $M_y = -a F_z$, $M_z = a F_y$. Deshalb rechnet das Programm mit $|\Delta x|$; ein vorzeichenbehaftetes $x$ eingesetzt wäre auf einer Seite falsch. Die Ergebnistabelle zeigt $\Delta x$ und die Momente aus Querkräften in eigenen Zeilen. Die Maske passt mit vier Feldern und Hinweiszeile auf den Bildschirm.
 
 **Grenzen:**
 - Berechnungen basieren auf den integralen Querschnittswerten der Gesamtform, spezielle lokale Effekte (z.B. Spannungssingularitäten an scharfen Innenecken) werden nach der elementaren Balkentheorie vernachlässigt.
@@ -186,7 +198,9 @@ wäre der Querschnitt nicht biegesteif); andernfalls wird die Eingabe mit Begrü
 - Berechnung der Kernfläche des Querschnitts zur Sicherstellung einer überdrückten/überzogenen Fuge.
 - Anzeige sowohl der umhüllenden Geraden als auch der zugehörigen Kernpunkte.
 - Umschalten zwischen der Darstellung der umhüllenden Geraden und dem Kernflächenpolygon über den Kernflächenmodus.
-- Anzeige von Schnittpunkten der Begrenzungsgeraden und Kennzeichnung paralleler beziehungsweise ins Unendliche laufender Geraden.
+- Hover über einer umhüllenden Geraden: Schnittpunkte mit den Hauptachsen 1 (η) und 2 (ζ), beschriftet mit dem Abschnitt vom Schwerpunkt aus (vorzeichenrichtig in Richtung der gezeichneten Achsen); parallel zu einer Hauptachse: Pfeil „inf“. Damit gilt die Handformel $\eta_K = -i_\zeta^2/a_\eta$, $\zeta_K = -i_\eta^2/a_\zeta$. Früher lagen die Punkte auf Schwerachsen parallel zum KOS und waren mit KOS-Koordinaten beschriftet, das passte bei $I_{yz} \ne 0$ zu keiner Handrechnung.
+- Hover über einem Kernpunkt (Seite 2): Koordinaten im gezeichneten KOS und im HAS (η, ζ vom Schwerpunkt aus), zweizeilig, am rechten Rand eingerückt.
+- Die gestrichelten Hauptachsen 1 und 2 zeigen in Richtung η und ζ wie in der σx-Tabelle (φ* von der angezeigten y-Achse aus); bei gedrehtem KOS zeigten sie früher teils entgegengesetzt. Getestet in `Emulator/tests/querschnitt.lua` (Fälle 43 und 44: Handformel für alle Kanten eines Trapezes bei KOS 0°, 90°, 180°; Kerndrittel am Rechteck).
 - Die Kernfläche kann als Kontrolle für die Lage einer Druckresultierenden relativ zum Schwerpunkt genutzt werden.
 
 **Grenzen:**
@@ -244,7 +258,7 @@ wäre der Querschnitt nicht biegesteif); andernfalls wird die Eingabe mit Begrü
 - `t`: Einzelwertetabelle öffnen.
 - `v`: Schubverlaufs-Auswahl öffnen; Ziffern `0` bis `9` wählen die Darstellung.
 - `k`: Kernflächenmodus weiterschalten.
-- `o`: Optionen öffnen; Pfeil links/rechts blättert zwischen Seite 1 (`Optionen`), Seite 2 (`Weitere Optionen`) und Seite 3 (`Querschnittswerte`, manuelles Überschreiben von A, I_y, I_z, I_yz, siehe 3a). Seite 2 enthält `KOS in Schwerpunkt verschieben`, `KOS entlang y verschieben`, `KOS entlang z verschieben` und `FTM-Bezug`: dieser Schalter legt fest, ob die angezeigten Flächenträgheitsmomente auf den **Schwerpunkt** (Standard) oder auf den **Ursprung des gezeichneten KOS** bezogen sind. Er wirkt auf die Ergebnisliste (`I_y,S` bzw. `I_y (KOS)`) und auf die Einzelwerte-Tabelle (Steiner-Anteile und Gesamtwerte, Überschrift nennt den Bezug).
+- `o`: Optionen öffnen; Pfeil links/rechts blättert zwischen Seite 1 (`Optionen`), Seite 2 (`Weitere Optionen`) und Seite 3 (`Querschnittswerte`, manuelles Überschreiben von A, I_y, I_z, I_yz und Schwerpunkt y_S, z_S, siehe 3a). Seite 2 enthält `KOS in Schwerpunkt verschieben`, `KOS entlang y verschieben`, `KOS entlang z verschieben`, `FTM-Bezug` und `Rasterpunkte` (Zeile 5, Enter schaltet `rasterPunkte` Normal → Dick → Keine; 1×1- bzw. 2×2-Pixel oder keine Punkte, das Fangen am Raster bleibt; Zeile 6 zurück). `FTM-Bezug`: dieser Schalter legt fest, ob die angezeigten Flächenträgheitsmomente auf den **Schwerpunkt** (Standard) oder auf den **Ursprung des gezeichneten KOS** bezogen sind. Er wirkt auf die Ergebnisliste (`I_y,S` bzw. `I_y (KOS)`) und auf die Einzelwerte-Tabelle (Steiner-Anteile und Gesamtwerte, Überschrift nennt den Bezug).
 - `h`: Geometrie automatisch einpassen.
 - `+`/`-`: Zoom ändern.
 - `Esc`: Aktuelle Eingabe oder Ansicht abbrechen. Ist eine Meldungsbox offen, schließt das erste `Esc` nur die Box.

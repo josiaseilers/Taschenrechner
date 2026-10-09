@@ -1,0 +1,1336 @@
+% !TEX root = Anleitung.tex
+% Teil "Die Mathematik hinter den Features" -- wird von Anleitung.tex mit \input{Mathe} eingebunden.
+
+\part{Die Mathematik hinter den Features}\label{sec:Mathe}
+
+Vorabl will ich erwähnen, das Teile dieses Abschnitts nicht meine direkte Arbeit selbst sind,
+gerade wenn es darum geht das Programm effizient und oder robust zu schreiben, oder wenn
+sich das Skript methoden der weiterführenden Mathematik bzw Nummerik bedient, stammen Ideen von KI wie z.B. die $LDL^T$ Zerlegung
+(Ich bin selber erst im 2. Semester deswegen halten sich meine mathematischen Kenntnisse noch in Grenzen).
+Das gilt übrigens auch für große Teile der Umsetztung. Aus diesem Grund halte ich die Erklärugen zu diesen Aspekten hier etwas kürzer.
+
+Nichts deso trotz gilt, dass dieser Teil für alle, ist die wissen wollen, \emph{warum} das Programm rechnet, wie es rechnet.
+Zum Benutzen braucht ihr ihn nicht. Grundlegende Sachen wie Hebelarme, Steiner und Gleichgewicht seien hier nicht weiter erläutert. Hier
+werden die Stellen behandelt, an denen das Programm mehr macht als die Vorlesung oder es anders macht,
+weil ein Rechner eben nicht wie ein Mensch rechnet. Ich habe versucht, zu jedem Punkt dazuzuschreiben,
+was er für euch in der Klausur bedeutet.
+
+Ein paar Konventionen, die überall gelten:
+
+\begin{itemize}
+  \item Im \textbf{Tragwerksskript} zeigt $x$ nach rechts und $y$ nach \emph{unten}. Drehwinkel,
+        Momente und Lastwinkel zählen trotzdem so, wie ihr sie seht: gegen den Uhrzeigersinn
+        positiv.
+  \item Jeder Stab hat seine eigene Koordinate $x \in [0, L]$ vom Anfangs- zum Endknoten, die
+        Tangente $\vec t = (\Delta x, \Delta y)/L$ und die Normale $\vec n = (-\Delta y, \Delta x)/L$.
+        Die Schnittgrößen folgen der TM1-Konvention mit gestrichelter Faser auf der Seite von
+        $\vec n$.
+  \item Im \textbf{Querschnittsskript} gilt die Konvention aus dem Gross (TM2):
+        $I_y = \int z^2\,dA$, $I_z = \int y^2\,dA$ und $I_{yz} = -\int yz\,dA$, also mit Minus.
+\end{itemize}
+
+%---------------------------------------------------------------------
+\section{Das Weggrößenverfahren im Programm}\label{sec:mathe-wgv}
+
+Alles, was ihr im Tragwerksskript seht (Verläufe, Auflagerkräfte, Verformungen,
+Explosionszeichnung), kommt aus einer einzigen Rechnung: dem Weggrößenverfahren, also genau dem
+allgemeinen WGV aus \textbf{Statik}. Unbekannt sind die Verschiebungen der Knoten, nicht die
+Kräfte.
+
+\textbf{Unbekannte:} Jeder Knoten hat drei Freiheitsgrade, $u_\xi$, $u_\eta$ und $\varphi$. Bei
+einem ungedrehten Lager ist $\xi = x$ und $\eta = y$, bei einem gedrehten Lager zeigen sie in die
+Lagerrichtungen. Ein Lager \emph{streicht} einfach den gehaltenen Freiheitsgrad, es gibt keine
+\enquote{sehr steife Feder} als Ersatz.
+
+\textbf{Stabsteifigkeit:} Für jeden Stab steht die bekannte $6 \times 6$-Matrix aus $EA/L$,
+$12EI/L^3$, $6EI/L^2$, $4EI/L$ und $2EI/L$. Sie verknüpft die sechs Endverschiebungen
+$(u_a, w_a, \varphi_a, u_b, w_b, \varphi_b)$ im lokalen System des Stabes mit den sechs
+Endkräften. Zwei Drehungen bringen sie ins globale System: die Stabrichtung und (bei einem
+gedrehten Lager) die Lagerrichtung,
+\[
+  K_e = T_K\,T^T\,k\,T\,T_K^T .
+\]
+So ist ein gedrehtes Lager kein Sonderfall, sondern nur eine andere Basis am Knoten. Matrix,
+Transformation und Drehrichtungen sind dieselben wie in der WGV-Formelsammlung aus Statik, die
+FEM-Formelsammlung hat dieselben Elemente, zählt die Querrichtung aber nach oben. Die
+Unterschiede stehen in Abschnitt~\ref{sec:wgv-vorzeichen}.
+
+\textbf{Lasten:} Knotenlasten gehen direkt in den Lastvektor (vorher um den Lastwinkel gedreht).
+Streckenlasten gehen als Festeinspannkräfte ein. Das sind die Endkräfte, die ein
+beidseitig eingespannter Stab unter der Last hätte, z.\,B.\ $\mp qL/2$ und $\pm qL^2/12$ bei
+Gleichlast (die Volleinspannmomente aus Tafel~A9 der Formelsammlung, mit denselben Vorzeichen).
+Im Gesamtsystem stehen sie mit umgekehrtem Vorzeichen, also als Knotenersatzlasten. Für Trapezlasten stehen die entsprechenden Formeln im Code, Lastfunktionen wie
+\code{x\^{}2} integriert das Programm mit den Hermite-Formfunktionen
+$N_1 = 1 - 3\xi^2 + 2\xi^3$, $N_2 = L(\xi - 2\xi^2 + \xi^3)$ usw.\ (arbeitsäquivalente
+Knotenlasten, Abschnitt~\ref{sec:mathe-festeinspann}). Temperatur wirkt wie eine Last $EA\,\varepsilon_T$ bzw.\ $EI\,\kappa_T$ an den
+Stabenden. Globale Linienlasten $p_X(x)$, $p_Y(x)$ werden vorher in Quer- und Längsanteil zerlegt,
+bei einer projizierten Last ist $x$ die globale Koordinate ab dem Stabanfang, $x_{global} = f\,x$
+mit dem Projektionsfaktor $f = |\Delta y|/L$ bzw.\ $|\Delta x|/L$, und je Stablänge wirkt
+$f\,p(f\,x)$.
+
+\textbf{Lösen:} Das Gesamtsystem $K\,u = F$ wird mit einer $LDL^T$-Zerlegung gelöst. Wird dabei
+ein Diagonalelement $D_j$ (fast) null, fehlt dem System in dieser Richtung jede Steifigkeit. Es
+ist ein Mechanismus, und ihr bekommt \emph{System ist kinematisch!}.
+
+\textbf{Zurückrechnen:} Aus den Knotenverschiebungen folgen die Endkräfte jedes Stabes,
+$s = k\,v + p$ (Steifigkeit mal Endverschiebung plus Festeinspannkraft), und aus dem Anfangswert
+durch Integrieren der Lasten die Verläufe, z.\,B.\
+$M(x) = M_a + Q_a x - m\,x - \int_0^x q(t)\,(x-t)\,dt$. Das ist exakt, nicht genähert. Deshalb
+braucht jeder Bereich zwischen Lasten, Lagern und Gelenken nur einen einzigen Stab, aber eben
+einen eigenen.
+
+\textbf{Auflagerkräfte:} Die Summe der Stabendkräfte an einem Knoten minus der Knotenlast ist die
+Kraft, die Lager und Federn auf den Knoten ausüben. Davon zeigt das Programm
+$R_\xi = \vec R\cdot\vec\xi$ und $R_\eta = -\vec R\cdot\vec\eta$, deshalb zeigt $R_\eta$ nach oben,
+während die Knotenverschiebung \code{ü\_y} auf derselben Menüseite nach unten positiv ist.
+
+\subsection{Festeinspannkräfte beliebiger Lasten}\label{sec:mathe-festeinspann}
+
+Für das Gesamtsystem braucht das Programm bzw. das WGV von einer Streckenlast nur, was sie an den Stabenden
+bewirkt, die Festeinspannkräfte. Für Gleich- und Trapezlasten stehen diese In Tafeln oder in der FOS, für eine
+Lastfunktion wie $q(x) = x^2$ oder $q_0 \sin(\pi x/L)$ nicht. Das Programm rechnet sie deshalb für
+jede Lastfunktion mit den Hermite-Funktionen aus, und zwar exakt, nicht genähert.
+
+\textbf{Die Hermite-Funktionen.} Im lokalen System läuft $x$ von $0$ bis $L$, $\xi = x/L$, $w$ zeigt
+zur gestrichelten Faser und $\varphi = -w'$ gegen den Uhrzeigersinn. Die vier Funktionen sind
+\begin{align*}
+  N_1 &= 1 - 3\xi^2 + 2\xi^3       && w(0) = 1, \\
+  N_2 &= L\,(\xi - 2\xi^2 + \xi^3) && w'(0) = 1, \text{ also } \varphi_a = -1, \\
+  N_3 &= 3\xi^2 - 2\xi^3           && w(L) = 1, \\
+  N_4 &= L\,(-\xi^2 + \xi^3)       && w'(L) = 1, \text{ also } \varphi_b = -1,
+\end{align*}
+und die jeweils drei anderen Endwerte sind null. Jede ist eine kubische Parabel, löst also
+$EI\,w'''' = 0$ exakt und stellt somit eine homogene Lösung der DGL dar.
+Gleichzeitig erfüllt sie die vier von ihr geforderten Randbedingungen. Damit ist sie genau die Biegelinie des
+beidseitig eingespannten Stabes, dem man diese eine Einheitsverformung aufzwingt.
+
+Das WGV zählt die vier Endverschiebungen eines Stabes aber als $v = (w_a, \varphi_a, w_b, \varphi_b)$,
+mit $\varphi$ gegen den Uhrzeigersinn positiv. Die Einheitsverformung zum Freiheitsgrad $j$ in
+dieser Zählung heißt im Folgenden $S_j$ (S für Formfunktion, engl.\ \emph{shape}):
+\[
+  S_1 = N_1, \qquad S_2 = -N_2, \qquad S_3 = N_3, \qquad S_4 = -N_4 .
+\]
+Bei den Drehungen kehrt sich das Vorzeichen um, weil $N_2$ und $N_4$ zu $\varphi = -1$ gehören.
+
+\textbf{Beweisidee mit dem Satz von Betti.} Die folgende Herleitung soll die Idee zeigen und
+ist kein formal vollständiger Beweis. So nennen wir alle $F_i$ Kräfte und alle Verschiebungen Wege,
+obwohl bei den Drehungen Momente und Winkel gemeint sind, und die Einheitsverschiebung \enquote{$1$}
+hat eigentlich eine Einheit (m bzw.\ rad). Das formal sauber mitzuschleppen ändert am Ergebnis
+nichts, macht die Rechnung aber deutlich schwerer zu lesen.
+
+Die Festeinspannkräfte $F_i$ sind die Kräfte und
+Momente, die die Einspannungen auf den belasteten Stab ausüben, jeweils in positiver Richtung des
+Freiheitsgrades (das $p$ in $s = k\,v + p$). Man schneidet den Stab frei. Die Einspannungen sind
+dann nur noch Kräfte an den Stabenden, und man hat \emph{ein} System mit zwei Lastgruppen:
+
+\begin{itemize}
+  \item Lastgruppe~1: die Last $q(x)$ und die Endkräfte $F_j$, die die Enden festhalten (gesucht).
+        Die Biegelinie ist $w_1$ mit $w_1 = w_1' = 0$ an beiden Enden, alle Endverschiebungen sind
+        also $v_j^{(1)} = 0$.
+  \item Lastgruppe~2: nur die Endkräfte $k_{ji}$, die den Freiheitsgrad $i$ um $1$ verschieben und
+        alle anderen festhalten. Die Biegelinie ist $S_i(x)$, die Endverschiebungen sind
+        $v_j^{(2)} = \delta_{ij}$ (Kronecker-Delta: $1$ für $j = i$, sonst $0$).
+\end{itemize}
+
+Beide Gruppen sind für sich im Gleichgewicht, deshalb stört es nicht, dass der freigeschnittene
+Stab nicht gelagert ist. Nach Betti leistet Lastgruppe~1 auf den Wegen von Lastgruppe~2 dieselbe
+Arbeit wie Lastgruppe~2 auf den Wegen von Lastgruppe~1:
+\[
+  \int_0^L q(x)\,S_i(x)\,dx + F_j\,v_j^{(2)} = k_{ji}\,v_j^{(1)} .
+\]
+Über das doppelte $j$ wird auf beiden Seiten summiert (Einsteinsche Summenkonvention). Setzt man
+die Verschiebungen ein, bleibt links $F_j\,\delta_{ij} = F_i$ und rechts null. Die innere Arbeit
+fehlt dabei nicht, sie ist der Grund für die Gleichheit:
+\[
+  W_a^{1 \to 2} = \int_0^L M_1\,\kappa_2\,dx = \int_0^L \frac{M_1 M_2}{EI}\,dx
+  = \int_0^L M_2\,\kappa_1\,dx = W_a^{2 \to 1} .
+\]
+Das erste und das letzte Gleichheitszeichen sind das Prinzip der virtuellen Arbeit (äußere gleich
+innere Arbeit), in der Mitte steht $\kappa = M/EI$. Betti schreibt nur die beiden Enden dieser Kette
+hin. Die Kette enthält nur die Biegearbeit. Das Programm rechnet nach Euler-Bernoulli, der Stab ist
+also schubstarr ($\gamma = 0$), und die Querkraft leistet keine innere Arbeit. Nach Timoschenko käme
+in der Mitte noch $\int_0^L Q_1 Q_2/(GA_s)\,dx$ dazu. Betti gilt dann weiterhin, nur wären die $S_i$
+andere Kurven, die auch von $GA_s$ abhängen.
+
+Dass die gemischte innere Arbeit hier null ist, obwohl die Schnittgrößen aus Lastgruppe~2 auf
+der Biegung aus Lastgruppe~1 lokal sehr wohl Arbeit leisten, sieht man auch direkt: $M_2$ ist ohne
+Streckenlast linear, also $M_2'' = 0$, und zweimal partiell integriert bleibt
+\[
+  \int_0^L M_2\,\kappa_1\,dx = -\int_0^L M_2\,w_1''\,dx
+  = \Bigl[-M_2\,w_1' + M_2'\,w_1\Bigr]_0^L - \int_0^L M_2''\,w_1\,dx = 0 ,
+\]
+weil $w_1$ und $w_1'$ an beiden Enden verschwinden. Also gilt für jede Lastfunktion
+\[
+  F_i = -\int_0^L q(x)\,S_i(x)\,dx .
+\]
+Mit $S_1 = N_1$, $S_2 = -N_2$, $S_3 = N_3$ und $S_4 = -N_4$ ergibt das genau die Formeln im
+Programm:
+\begin{align*}
+  Q_a &= -\int_0^L q\,N_1\,dx, & M_a &= \int_0^L q\,N_2\,dx, \\
+  Q_b &= -\int_0^L q\,N_3\,dx, & M_b &= \int_0^L q\,N_4\,dx.
+\end{align*}
+
+\textbf{Anschaulich} ist $S_i(x)$ die Einflusslinie der Festeinspannkraft $i$ (Satz von
+Müller-Breslau): Eine Einzelkraft $P$ an der Stelle $a$ erzeugt $F_i = -P\,S_i(a)$, und das Integral
+summiert nur die vielen kleinen Einzellasten $q\,dx$ auf.
+
+\textbf{Kontrolle mit Gleichlast:} $\int_0^L N_1\,dx = L/2$, $\int_0^L N_2\,dx = L^2/12$ und
+$\int_0^L N_4\,dx = -L^2/12$. Damit ist $Q_a = Q_b = -qL/2$ (die Last zeigt nach unten, die
+Einspannung drückt dagegen) und $M_a = qL^2/12$, $M_b = -qL^2/12$, genau die Tafelwerte. Auch das
+Vorzeichen von $M_a$ passt: Ohne Einspannung würde sich das linke Ende im Uhrzeigersinn drehen, die
+Einspannung hält gegen den Uhrzeigersinn dagegen.
+
+\textbf{Die anderen Lastarten.}
+\begin{itemize}
+  \item Ein \textbf{Streckenmoment} $m(x)$ (gegen den Uhrzeigersinn positiv) leistet Arbeit auf der
+        Verdrehung, $\int m\,\varphi\,dx = -\int m\,w'\,dx$. Mit Betti wird daraus
+        $F_i = \int_0^L m\,S_i'\,dx$, also $Q_a = \int m\,N_1'\,dx$, $M_a = -\int m\,N_2'\,dx$ und
+        entsprechend am Ende $b$. Bei konstantem $m$ ist $\int N_1'\,dx = N_1(L) - N_1(0) = -1$ und
+        $\int N_2'\,dx = 0$: $Q_a = -m$, $Q_b = +m$ und keine Endmomente. Das ist das Kräftepaar aus
+        Abschnitt~\ref{sec:wgv-vorzeichen} und der Grund, warum das Programm vom $m\,l/2$ der
+        WGV-Tafel abweicht.
+  \item Für eine \textbf{Längslast} $n(x)$ sind die Formfunktionen linear, $1 - \xi$ und $\xi$ (sie
+        lösen $EA\,u'' = 0$ exakt), und es gilt $N_a = -\int n\,(1-\xi)\,dx$, $N_b = -\int n\,\xi\,dx$.
+  \item \textbf{Temperatur} ist keine Last, sondern eine eingeprägte Verzerrung. Die
+        Festeinspannkräfte stehen direkt da: $N_a = EA\,\varepsilon_T$, $N_b = -EA\,\varepsilon_T$,
+        $M_a = EI\,\kappa_T$, $M_b = -EI\,\kappa_T$.
+\end{itemize}
+
+\textbf{Zwei Wege im Code.} Für konstante Lasten und Trapezlasten
+$q = p_a(1-\xi) + p_b\,\xi$ sind die Integrale schon ausgerechnet:
+\begin{align*}
+  Q_a &= -\tfrac{L}{60}\,(21p_a + 9p_b),   & M_a &= \tfrac{L^2}{60}\,(3p_a + 2p_b), \\
+  Q_b &= -\tfrac{L}{60}\,(9p_a + 21p_b),   & M_b &= -\tfrac{L^2}{60}\,(2p_a + 3p_b).
+\end{align*}
+Hängt die Last von $x$ ab (auch bei $m(x)$, $n(x)$ und den globalen Linienlasten), rechnet das CAS
+genau die Integrale oben aus. Ein Beispiel:
+Für $q(x) = q_0 \sin(\pi x/L)$ ist wegen $N_1 + N_3 = 1$ und der Symmetrie
+$\int_0^L q\,N_1\,dx = \frac12 \int_0^L q\,dx = q_0L/\pi$, also $Q_a = -q_0L/\pi$. Für das Moment
+braucht man $\int_0^1 \sin(\pi\xi)\,(\xi - 2\xi^2 + \xi^3)\,d\xi = 2/\pi^3$, also
+$M_a = 2q_0L^2/\pi^3 \approx 0{,}0645\,q_0L^2$.
+
+\textbf{Warum das exakt ist.} Betti gilt für jede Last, und die $S_i$ sind exakte Lösungen der
+homogenen Gleichung. Also sind die Festeinspannkräfte exakt, damit auch die Knotenverschiebungen aus
+$K\,u = F$ und die Stabendkräfte $s = k\,v + p$. Nicht exakt wäre nur die Hermite-Interpolation
+$\sum_j v_j S_j(x)$ im Feld, denn die kennt die Last nicht. Die benutzt das Programm aber nie als
+Ergebnis (siehe unten).
+
+\textbf{Zwei Zerlegungen derselben Biegelinie.} Die Biegelinie eines Stabes ist immer
+Partikulärlösung plus homogene Lösung. Welche Partikulärlösung man nimmt, ist aber nicht
+festgelegt: Zwei Partikulärlösungen unterscheiden sich immer um eine kubische Parabel, also um eine
+homogene Lösung. Das Programm benutzt zwei davon, und beide beschreiben dieselbe Linie.
+
+\begin{itemize}
+  \item \emph{Die Anfangswert-Lösung} ist das Vierfachintegral der Querlast,
+        \[
+          EI\,w_p(x) = \int_0^x q(t)\,\frac{(x-t)^3}{6}\,dt ,
+        \]
+        mit $w_p = w_p' = w_p'' = w_p''' = 0$ bei $x = 0$, so wie ihr sie in \textbf{TM2} aufstellt.
+        Dazu kommt die homogene Lösung, deren vier Konstanten die Randbedingungen erfüllen. Das
+        Rand-LGS schreibt sie als $c_1 x^3/6 + c_2 x^2/2 + c_3 x + c_4$ und holt die Konstanten aus
+        allen Rand- und Übergangsbedingungen (Abschnitt~\ref{sec:mathe-randlgs}). Der alte Export
+        \code{v\_EI\_stab} schreibt sie mit den Hermite-Funktionen, und die Koeffizienten sind die
+        Endverschiebungen aus dem WGV:
+        \[
+          EI\,w = EI\,w_p + EI w_a\,N_1 + EI w_a'\,N_2 + \bigl(EI w_b - EI w_p(L)\bigr)\,N_3
+                  + \bigl(EI w_b' - EI w_p'(L)\bigr)\,N_4 .
+        \]
+        $w_p$ bringt am Ende $b$ schon eigene Werte mit, die ziehen die letzten beiden Koeffizienten
+        wieder ab, damit die Summe dort genau die Endverschiebung hat. Die Koeffizienten sind
+        Durchbiegung und Neigung, so wie ihr die Randbedingungen in \textbf{TM2} aufstellt. In der
+        Zählung des WGV ist $w_a = v_1$, $w_a' = -\varphi_a = -v_2$, $w_b = v_3$ und $w_b' = -v_4$.
+  \item \emph{Die Lösung des eingespannten Stabes} ist
+        \[
+          w_0(x) = w_p(x) - w_p(L)\,N_3(x) - w_p'(L)\,N_4(x) .
+        \]
+        Auch sie löst $EI\,w'''' = q$, hat aber an \emph{beiden} Enden $w_0 = w_0' = 0$: Das ist die
+        Biegelinie des beidseitig eingespannten Stabes unter der Last. Mit ihr zerfällt die Linie in
+        \[
+          w(x) = w_0(x) + \sum_j v_j\,S_j(x) ,
+        \]
+        und die Koeffizienten des homogenen Teils sind genau die Endverschiebungen $v_j$, also die
+        Unbekannten des WGV. Genau diese Form braucht das WGV: Der homogene Teil hängt nur an den
+        Knotenverschiebungen, die mehrere Stäbe gemeinsam haben, und $w_0$ meldet sich im
+        Gleichgewicht der Knoten nur über seine Endkräfte. Diese Endkräfte sind die
+        Festeinspannkräfte.
+\end{itemize}
+
+Bei Gleichlast ist $EI\,w_p = qx^4/24$ mit $EI\,w_p(L) = qL^4/24$ und $EI\,w_p'(L) = qL^3/6$, und
+daraus wird
+\[
+  EI\,w_0 = \frac{qL^4}{24}\bigl(\xi^4 - (3\xi^2 - 2\xi^3) - 4(\xi^3 - \xi^2)\bigr)
+          = \frac{q\,x^2 (L-x)^2}{24},
+\]
+die bekannte Biegelinie des eingespannten Balkens. Ihr Moment am linken Ende ist
+$-EI\,w_0''(0) = -qL^2/12$ (Zug oben), und die Einspannung hält mit $M_a = +qL^2/12$ gegen den
+Uhrzeigersinn dagegen. Der Satz von Betti erspart es, $w_0$ überhaupt auszurechnen: Die
+Festeinspannkräfte kommen direkt aus den Integralen über $q\,S_i$.
+
+Die fertige Biegelinie ist in beiden Zerlegungen dieselbe. Das sieht man, wenn man die Formel des
+alten Exports umsortiert. Mit $w_a'\,N_2 = -v_2\,N_2 = v_2\,S_2$ und genauso am Ende $b$ wird aus ihr
+\[
+  EI\,w = \underbrace{EI\,\bigl(w_p - w_p(L)\,N_3 - w_p'(L)\,N_4\bigr)}_{EI\,w_0}
+          + EI \sum_j v_j\,S_j ,
+\]
+also Buchstabe für Buchstabe die zweite Zerlegung, nur anders gruppiert. Das WGV nimmt $w_0$ nur, um die
+Gleichungen der Knoten aufzustellen. Die Verläufe rechnet das Programm danach wieder aus den
+exakten Endkräften (Gleichgewicht) bzw.\ mit der Anfangswert-Lösung plus Hermite-Anteil, wie im
+ersten Punkt.
+
+\subsection{Gelenke und die Knotenverdrehung}\label{sec:mathe-gelenke}
+
+Hier kommt die Warnung aus Abschnitt~\ref{sec:Eingabe_Knoten} her. Ein \textbf{M-Gelenk} wird nicht
+herauskondensiert, sondern bekommt einen eigenen Freiheitsgrad: Das Stabende am Gelenk hat seine
+eigene Verdrehung. Das Gelenkmoment ist null, weil in der Gleichung zu diesem Freiheitsgrad keine
+Last steht. Für die angezeigte Knotenverdrehung heißt das:
+
+\begin{itemize}
+  \item \textbf{Angelenk} (Gelenk am Stabende, andere Stäbe biegesteif am Knoten): Die
+        Knotenverdrehung ist die Verdrehung der \emph{biegesteif} angeschlossenen Stäbe. Der Stab
+        mit dem Gelenk dreht sich anders, seine Endverdrehung steht im Stabmenü auf Seite~7
+        ($\varphi_a$, $\varphi_b$), der Knick im Gelenk ist die Differenz.
+  \item \textbf{Vollgelenk} (Knoten gelenkig): Der Knoten hat \emph{gar keine} eigene Verdrehung,
+        jedes Stabende dreht sich für sich. Die $0$ im Knotenmenü ist nur ein Platzhalter, die
+        echten Verdrehungen stehen wieder auf Seite~7 der Stäbe.
+  \item \textbf{Nur Angelenke an einem Knoten}, aber kein Vollgelenk und kein Lager, das die
+        Drehung hält: Dann hat der Knoten eine Verdrehung, an der nichts hängt. Das Programm
+        meldet \emph{kinematisch}. Deshalb der Stolperstein im Anhang: In diesem Fall braucht ihr
+        das Vollgelenk.
+\end{itemize}
+
+\textbf{N- und Q-Gelenke} werden dagegen herauskondensiert (siehe Dallmann Baustatik 3): Im Stab wird der entsprechende Anteil
+der Steifigkeit gestrichen (beim N-Gelenk kann der Stab keine Normalkraft mehr aufbauen, beim
+Q-Gelenk bleibt nur ein konstantes Moment), die Festeinspannkräfte werden statisch gleichwertig
+umverteilt, und nach der Rechnung wird die Klaffung im Gelenk wieder ausgerechnet. Die
+Endverschiebungen auf Seite~7 enthalten sie.
+
+%---------------------------------------------------------------------
+\section{Starre Stäbe: Zwangsbedingungen und Nullraum}\label{sec:mathe-starr}
+
+Warum nicht einfach $EA = 10^{15}$? Weil der Rechner mit etwa 16 gültigen Stellen rechnet. Steht
+in derselben Matrix eine Feder mit $c = 1$ neben $10^{15}$, bleibt von der Feder nach der
+Zerlegung praktisch nichts übrig. Das ist der Zahlenmüll aus Abschnitt~\ref{sec:starr}. Das
+Programm macht es deshalb exakt.
+
+\textbf{1. Zwangsbedingungen.} Ein starrer Anteil bekommt in der Steifigkeitsmatrix die Steifigkeit
+\emph{null}. Stattdessen schreibt das Programm für jeden starren Stab auf, was \enquote{starr}
+bedeutet, und zwar in den lokalen Endverschiebungen:
+\begin{align*}
+  \text{dehnsteif:}\quad & u_b - u_a = \varepsilon_T L, \\
+  \text{biegesteif:}\quad & \varphi_a - \varphi_b = -\kappa_T L, \qquad
+                            w_b - w_a + L\,\varphi_a = -\kappa_T \frac{L^2}{2} .
+\end{align*}
+Ohne Temperatur steht rechts null: gleiche Länge, gleiche Endverdrehung, Enden auf einer Geraden.
+Alle Bedingungen zusammen, ins globale System gedreht, ergeben $C\,u = g$.
+
+\textbf{2. Kern der Matrix (=Nullraum).} $C$ wird mit Gauß-Jordan auf reduzierte Stufenform gebracht. Jede Zeile hat
+dann einen \emph{abhängigen} Freiheitsgrad (die Pivotspalte), der durch die übrigen, \emph{freien}
+Freiheitsgrade ausgedrückt wird. Damit lässt sich jede erlaubte Verschiebung schreiben als
+\[
+  u = T\,u_r + u_0 , \qquad C\,T = 0 .
+\]
+Die Spalten von $T$ spannen den Nullraum bzw. den Kern von $C$ auf, also genau die Bewegungen, die die starren
+Stäbe mitmachen. $u_r$ sind nur noch die freien Freiheitsgrade, $u_0$ ist der Temperaturanteil.
+
+\textbf{3. Projizieren.} Eingesetzt in $K\,u = F$ und von links mit $T^T$ multipliziert:
+\begin{equation} \label{eq:LGSred}
+  \left(T^T K\,T\right) u_r = T^T\left(F - K\,u_0\right).
+\end{equation}
+Das ist nichts anderes als das Prinzip der virtuellen Verschiebungen: Als virtuelle
+Verschiebungen sind nur noch solche zugelassen, die die Zwangsbedingungen erfüllen, also Spalten
+von $T$. Das neue System ist kleiner als das alte und genauso gut konditioniert wie ein System
+ohne starre Stäbe, weil nirgends eine riesige Zahl steht.
+
+\textbf{4. Kräfte in den starren Stäben.} Nach Schritt~3 kennt man die Verschiebungen $u$, aber
+noch keine Kraft in einem starren Stab, denn ihr Anteil in $K$ ist null. Setzt man $u$ in das
+Gleichgewicht der Knoten ein, bleibt ein Rest
+\[
+  r = F - K\,u .
+\]
+Das sind die Knotenkräfte, die weder die elastischen Stäbe noch die Federn aufnehmen. Diesen Rest
+müssen die starren Stäbe tragen.
+
+Das widerspricht nicht $K\,u = F$. In $K$ fehlen die starren Stäbe, denn ihre Kraft lässt sich
+nicht aus $u$ ausrechnen: Ein starrer Stab verformt sich bei jeder Kraft um null. Das vollständige
+Gleichgewicht der Knoten lautet
+\[
+  K\,u + (\text{Kräfte der starren Stäbe}) = F ,
+\]
+und $r$ ist genau der fehlende Anteil. Das kennt man von den Lagern: Auch an einem gehaltenen
+Freiheitsgrad bleibt ein Rest, und der ist die Auflagerkraft. Ein starrer Stab ist so etwas wie ein
+inneres Lager, das statt einer absoluten eine relative Verschiebung festhält.
+
+\emph{Woher die $\lambda$ kommen.} Schritt~3 hat nicht $K\,u = F$ gelöst, sondern nur
+\eqref{eq:LGSred}. Alles auf eine Seite gebracht und $u = u_0 + T\,u_r$ eingesetzt:
+\begin{align*}
+  0 &= T^T F - T^T K\,u_0 - T^T K\,T\,u_r \\
+    &= T^T\bigl(F - K\,(u_0 + T\,u_r)\bigr) = T^T\,(F - K\,u) = T^T r .
+\end{align*}
+Die Zeilen von $T^T$ sind die Spalten von $T$, also eine Basis des Kerns von $C$. $T^T r = 0$ sagt
+deshalb: $r$ steht auf jedem dieser Basisvektoren und damit auf dem ganzen Kern von $C$ senkrecht.
+
+Daraus folgt, dass sich $r$ aus den Zeilen von $C$ zusammensetzen lässt. Das ist reine lineare
+Algebra aus \textbf{HM1}. $C$ hat $m$ Zeilen (eine je Zwangsbedingung) und $n$ Spalten (eine je
+Freiheitsgrad). Im $\mathbb R^n$ liegen damit zwei Unterräume:
+\begin{itemize}
+  \item $\operatorname{Kern} C$: alle $x$ mit $C\,x = 0$,
+  \item $\operatorname{Bild} C^T$: alle Vektoren $C^T\lambda$, also alle Kombinationen der Zeilen
+        von $C$.
+\end{itemize}
+Gezeigt wird $r \in \operatorname{Bild} C^T$, und zwar in vier Schritten.
+
+\emph{(a) $r$ steht senkrecht auf $\operatorname{Kern} C$.} Das haben wir gerade gesehen.
+
+\emph{(b) $\operatorname{Bild} C^T$ steht senkrecht auf $\operatorname{Kern} C$.} Für ein $x$ aus
+$\operatorname{Kern} C$ und einen beliebigen Vektor $C^T\lambda$ gilt
+\[
+  (C^T\lambda)^T x = \lambda^T C\,x = \lambda^T 0 = 0 .
+\]
+Das erste Gleichheitszeichen ist nur die Rechenregel $(AB)^T = B^T A^T$. Insbesondere liegt außer
+der Null kein Vektor in beiden Räumen, denn er müsste auf sich selbst senkrecht stehen.
+
+\emph{(c) Zusammen füllen beide Räume den ganzen $\mathbb R^n$.} Nach der Dimensionsformel ist
+$\dim\operatorname{Kern} C + \dim\operatorname{Bild} C = n$, und weil Zeilenrang gleich Spaltenrang
+ist, gilt $\dim\operatorname{Bild} C^T = \dim\operatorname{Bild} C$. Also ist
+$\dim\operatorname{Kern} C + \dim\operatorname{Bild} C^T = n$. Weil sich die beiden Räume nur in der
+Null treffen, lässt sich jeder Vektor des $\mathbb R^n$ eindeutig als Summe aus einem Teil in
+$\operatorname{Kern} C$ und einem Teil in $\operatorname{Bild} C^T$ schreiben.
+
+\emph{(d) $r$ liegt in $\operatorname{Bild} C^T$.} Man zerlegt $r = r_K + r_B$ mit $r_K$ in
+$\operatorname{Kern} C$ und $r_B$ in $\operatorname{Bild} C^T$. Nach (a) und (b) stehen $r$ und
+$r_B$ senkrecht auf $\operatorname{Kern} C$, also auch $r_K = r - r_B$. $r_K$ liegt aber selbst in
+$\operatorname{Kern} C$, steht also senkrecht auf sich selbst, und das kann nur der Nullvektor.
+Damit ist $r = r_B$.
+
+Ein Beispiel mit Zahlen: $30$ Freiheitsgrade und ein starrer Stab, der dehn- und biegesteif ist
+($3$ unabhängige Zeilen). $\operatorname{Kern} C$ ist $27$-dimensional, das sind die $27$
+Unbekannten $u_r$ in Schritt~3. $\operatorname{Bild} C^T$ ist $3$-dimensional, das sind die drei
+$\lambda$.
+
+Es gibt also Zahlen $\lambda_k$, eine je Zwangsbedingung, mit
+\[
+  r = C^T \lambda = \sum_k \lambda_k\,C_k^T ,
+\]
+wobei $C_k$ die $k$-te Zeile von $C$ ist. Weil $r$ nach dem vollständigen Gleichgewicht genau die
+Kräfte der starren Stäbe sind, heißt das: Die starren Stäbe wirken mit $C^T\lambda$ auf die Knoten,
+und jede Zwangsbedingung~$k$ trägt $\lambda_k\,C_k^T$ dazu bei. Das vollständige Gleichgewicht
+lautet damit
+\[
+  K\,u + C^T\lambda = F .
+\]
+Mit $T^T$ multipliziert fällt $\lambda$ wegen $T^T C^T = (C\,T)^T = 0$ heraus, das ist Schritt~3.
+Die übrigen Gleichungen erfüllt Schritt~4 mit der passenden Wahl von $\lambda$. Die $\lambda$ sind
+übrigens die Lagrange-Multiplikatoren, die man bekommt, wenn man das Minimum der potentiellen
+Energie $\frac12\,u^T K\,u - F^T u$ unter der Nebenbedingung $C\,u = g$ sucht.
+
+\emph{Mechanisch gelesen.} Das Skalarprodukt aus Kraft und Verschiebung ist die Arbeit,
+\enquote{senkrecht} heißt also \enquote{keine Arbeit}. (a) sagt dann: Die Kräfte der starren Stäbe
+leisten auf keiner Bewegung Arbeit, die die starren Stäbe erlauben. Genau das zeichnet eine
+Zwangskraft aus. Eine reibungsfreie Führung leistet auf der Bewegung, die sie zulässt, auch keine
+Arbeit, sie verhindert nur alle anderen. Physikalisch steckt diese Annahme schon in Schritt~3: Dort
+sind als virtuelle Verschiebungen nur solche zugelassen, die die Zwangsbedingungen erfüllen. Alles
+danach ist reine Mathematik.
+
+Eindeutig sind die $\lambda$ nur, wenn die Zeilen von $C$ linear unabhängig sind, also
+$\operatorname{Kern} C^T = \{0\}$ gilt. Dann gehört zu jeder Kraft aus $\operatorname{Bild} C^T$
+genau ein $\lambda$. Ist $\operatorname{Kern} C^T$ größer, gibt es Kräfte in den starren Stäben,
+die auf keinen Knoten wirken. Das sind die Eigenspannungszustände weiter unten.
+
+\emph{Warum die $\lambda$ Schnittgrößen sind.} Das folgt aus dem Gleichgewicht des einzelnen
+starren Stabes, und zwar mit demselben Werkzeug wie eben: Kern, Bild und Dimensionsformel, diesmal
+für einen Stab allein. Im lokalen System hat ein Stab die sechs Endverschiebungen
+$v = (u_a, w_a, \varphi_a, u_b, w_b, \varphi_b)$ und sechs Endkräfte $s$ in denselben Richtungen.
+Die drei Zeilen eines biege- und dehnsteifen Stabes bilden die $3 \times 6$-Matrix
+\[
+  C_\ell = \begin{pmatrix} -1 & 0 & 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 & 0 & -1 \\ 0 & -1 & L & 0 & 1 & 0 \end{pmatrix}
+  \qquad
+  \begin{matrix} \text{Längszeile: } u_b - u_a \\ \text{Drehzeile: } \varphi_a - \varphi_b \\
+                 \text{Querzeile: } w_b - w_a + L\,\varphi_a \end{matrix}
+\]
+
+\emph{(a) Starr heißt: nur Starrkörperbewegungen.} Ein Stab kann sich auf drei Arten bewegen, ohne
+sich zu verformen: längs verschieben, quer verschieben und um das Ende $a$ drehen. In
+Endverschiebungen sind das die Spalten von
+\[
+  R = \begin{pmatrix} 1 & 0 & 0 & 1 & 0 & 0 \\ 0 & 1 & 0 & 0 & 1 & 0 \\ 0 & 0 & 1 & 0 & -L & 1 \end{pmatrix}^T
+\]
+(bei der Drehung um $\varphi = 1$ wandert das Ende $b$ wegen $\varphi = -w'$ um $w_b = -L$).
+Einsetzen zeigt $C_\ell R = 0$: Starrkörperbewegungen verformen nichts, $\operatorname{Bild} R
+\subseteq \operatorname{Kern} C_\ell$. Beide Matrizen haben Rang~$3$, nach der Dimensionsformel ist
+also $\dim \operatorname{Kern} C_\ell = 6 - 3 = 3 = \dim \operatorname{Bild} R$, und damit
+$\operatorname{Kern} C_\ell = \operatorname{Bild} R$. Die Zwangsbedingungen lassen genau die
+Starrkörperbewegungen zu, nicht mehr und nicht weniger.
+
+\emph{(b) Gleichgewicht heißt: keine Arbeit auf Starrkörperbewegungen.} Endkräfte $s$ sind genau
+dann im Gleichgewicht, wenn
+\[
+  R^T s = \begin{pmatrix} s_1 + s_4 \\ s_2 + s_5 \\ s_3 - L\,s_5 + s_6 \end{pmatrix} = 0 ,
+\]
+das sind Summe der Kräfte längs, Summe der Kräfte quer und Summe der Momente um $a$. Anders gelesen
+ist das das PvV für einen starren Körper aus \textbf{TM1}: Auf jeder Starrkörperbewegung leisten die
+Kräfte keine Arbeit. Die Endkräfte, die für sich im Gleichgewicht sind, bilden also den Raum
+$\operatorname{Kern} R^T$.
+
+\emph{(c) Dieser Raum wird genau von den Zeilen aufgespannt.} Wie beim Nullraum oben in zwei
+Schritten. Inklusion: $R^T C_\ell^T = (C_\ell R)^T = 0$, also $\operatorname{Bild} C_\ell^T
+\subseteq \operatorname{Kern} R^T$. Dimension: $\dim \operatorname{Bild} C_\ell^T = \operatorname{Rang}
+C_\ell = 3$ und $\dim \operatorname{Kern} R^T = 6 - \operatorname{Rang} R = 3$. Also
+\[
+  \operatorname{Kern} R^T = \operatorname{Bild} C_\ell^T .
+\]
+Jede Gruppe von Endkräften im Gleichgewicht ist eine Kombination der drei Zeilen, und weil die
+Zeilen linear unabhängig sind, auf genau eine Weise.
+
+\emph{(d) Anwendung auf den starren Stab.} Auf den starren Stab wirken seine Lasten und seine
+Endkräfte $s$. Die Festeinspannkräfte $p$ halten die Lasten allein schon im Gleichgewicht, also ist
+$s - p$ für sich im Gleichgewicht. Nach (c) gibt es genau ein $\lambda_\ell \in \mathbb R^3$ mit
+\[
+  s = p + C_\ell^T \lambda_\ell .
+\]
+Ins globale System gedreht und über alle starren Stäbe summiert sind das genau die Knotenkräfte
+$C^T\lambda$ von oben, die $\lambda_\ell$ eines Stabes sind seine Einträge in $\lambda$. Ist ein Stab
+nur dehnsteif (oder hat er ein N- bzw.\ Q-Gelenk), fehlen die entsprechenden Zeilen; den Rest der
+Endkräfte liefert dann wie bei jedem Stab $k\,v$. $p$ darf man dabei unverändert nehmen, weil die
+Festeinspannkräfte nach Abschnitt~\ref{sec:mathe-festeinspann} gar nicht von $EI$ abhängen.
+
+\emph{(e) Was die drei Zahlen bedeuten.} Für jede Zeile liest man den Schnittgrößenverlauf des
+unbelasteten Stabes direkt ab, mit $N(0) = -s_1$, $Q(0) = -s_2$, $M(0) = -s_3$ wie bei jedem Stab:
+\begin{align*}
+  \text{Längszeile:}\quad & s = \lambda_N\,(-1, 0, 0, 1, 0, 0)^T: && N(x) = \lambda_N, \\
+  \text{Drehzeile:}\quad  & s = \lambda_M\,(0, 0, 1, 0, 0, -1)^T: && M(x) = -\lambda_M, \\
+  \text{Querzeile:}\quad  & s = \lambda_Q\,(0, -1, L, 0, 1, 0)^T: && Q(x) = \lambda_Q, \quad
+                                                                     M(x) = -\lambda_Q\,(L - x) .
+\end{align*}
+$\lambda_N$ ist also die Normalkraft, $\lambda_Q$ die Querkraft und $-\lambda_M$ das Moment am Ende
+$b$; zusammen $M(x) = -\lambda_M - \lambda_Q\,(L - x)$, dazu kommt der Anteil aus $p$. Mechanisch
+passt das: Die Arbeit von $\lambda_k\,C_k^T$ auf den Endverschiebungen ist $\lambda_k\,(C_k\,v)$,
+die Normalkraft arbeitet also auf der Längenänderung, das Moment auf der gegenseitigen Verdrehung
+und die Querkraft darauf, wie weit das Ende $b$ von der Tangente am Ende $a$ abweicht. Daher kommt
+der Satz \enquote{die Schnittgrößen aus dem Gleichgewicht}.
+
+\emph{Wie das Programm sie ausrechnet.} $r = C^T\lambda$ hat eine Gleichung je Freiheitsgrad, aber
+nur eine Unbekannte je Zwangsbedingung, also meist mehr Gleichungen als Unbekannte. Weil $r$ nach
+Schritt~3 eine Kombination der Zeilen von $C$ ist, geht es trotzdem exakt auf. Von links mit $C$
+multipliziert wird daraus ein kleines quadratisches System
+\[
+  (C\,C^T)\,\lambda = C\,r ,
+\]
+das eindeutig lösbar ist, solange die Zeilen von $C$ linear unabhängig sind.
+
+\textbf{Starre Teile, die sich gegenseitig halten.} Beispiele sind zwei dehnstarre Stäbe
+nebeneinander zwischen denselben zwei Knoten oder ein biegestarrer Zweifeldträger (zwei starre
+Stäbe über drei Lager). Dann sind einige Zeilen von $C$ linear abhängig. Das merkt schon die
+Elimination in Schritt~2: Eine solche Zeile wird null, nachdem die früheren Pivotspalten abgezogen
+sind. Das Programm protokolliert dabei, welche Kombination der ursprünglichen Zeilen null ergeben
+hat:
+\[
+  \sum_k \mu_k\,C_k = 0 \qquad\Longleftrightarrow\qquad C^T\mu = 0 .
+\]
+Physikalisch ist $\mu$ ein Satz von Kräften in den starren Stäben, der auf keinen Knoten eine Kraft
+ausübt, ein \emph{Eigenspannungszustand}. Bei den zwei Stäben nebeneinander ist das Zug~$1$ im
+einen und Druck~$1$ im anderen.
+
+Für die Kinematik ist eine abhängige Zeile harmlos, ohne Temperatur ist sie automatisch erfüllt. Für
+das Gleichgewicht heißt sie: $r = C^T\lambda$ hat unendlich viele Lösungen
+\[
+  \lambda = \lambda_p + \sum_i t_i\,\mu_i .
+\]
+Das ist die Aufteilung, die man von jedem LGS kennt: eine partikuläre Lösung plus beliebige
+Lösungen der homogenen Gleichung $C^T\mu = 0$. Und es ist genau die Aufteilung aus dem KGV in
+\textbf{Statik}:
+\begin{itemize}
+  \item $\lambda_p$ rechnet das Programm mit $(C\,C^T)\,\lambda = C\,r$ nur über die unabhängigen
+        Zeilen, die abhängigen bekommen $\lambda = 0$. Das ist, als würde man die überzähligen
+        Zwangsbedingungen aufschneiden: ein statisch bestimmtes Hauptsystem mit seinem
+        $0$-Zustand.
+  \item Die $\mu_i$ sind die $1$-Zustände. Jedes $\mu_i$ hat an seiner abhängigen Zeile eine $1$,
+        dazu kommen die Kräfte in den übrigen starren Stäben, die diese $1$ im Gleichgewicht halten.
+  \item Die $t_i$ sind die statisch Überzähligen $X_i$.
+\end{itemize}
+Wie im KGV legt das Gleichgewicht die $X_i$ nicht fest. Dort kommen sie aus der Verträglichkeit,
+und die braucht Nachgiebigkeiten. Genau die haben starre Stäbe nicht: Jede Wahl der $t_i$ ergibt
+dieselben Verschiebungen, und die Starrkörpermechanik kann nicht sagen, welche stimmt. Das hängt
+davon ab, wie starr die Stäbe \emph{im Verhältnis zueinander} wirklich sind.
+
+\textbf{Der Grenzwert und die Ergänzungsenergie.} Das Programm trifft dieselbe Annahme wie der
+Grenzwert im Rand-LGS: Alle starren Stäbe bekommen $EA = EI = 1/\varepsilon$ mit
+$\varepsilon \to 0$. Dann verformen sie sich ein kleines bisschen. In den Größen, die die Zeilen
+von $C$ messen, ist ihre elastische Verformung
+\[
+  C\,u - g = \varepsilon\,W\,\lambda ,
+\]
+wobei $W$ die Nachgiebigkeit der starren Stäbe mit $EA = EI = 1$ ist (blockweise je Stab, siehe
+unten). Das ist das Elastizitätsgesetz der fast starren Stäbe. Jetzt kommt die Verträglichkeit,
+mit dem Arbeitssatz wie im KGV: Der Eigenspannungszustand $\mu_i$ übt auf keinen Knoten eine Kraft
+aus, seine virtuelle Arbeit auf den wirklichen Verformungen $C\,u$ ist also
+$\mu_i^T C\,u = (C^T\mu_i)^T u = 0$. Die Verformungen bestehen aus dem elastischen Anteil und dem
+Temperaturanteil $g$, also
+\[
+  \varepsilon\,\mu_i^T W\,\lambda + \mu_i^T g = 0 .
+\]
+Ohne Temperatur fällt der zweite Term weg, das $\varepsilon$ kürzt sich heraus, und mit
+$\lambda = \lambda_p + \sum_j t_j\,\mu_j$ bleibt
+\[
+  \sum_j \underbrace{\mu_i^T W\,\mu_j}_{\delta_{ij}}\;t_j
+  = -\underbrace{\mu_i^T W\,\lambda_p}_{\delta_{i0}} .
+\]
+Das sind die Elastizitätsgleichungen des KGV (hier ist $\delta_{ij}$ wieder eine $\delta$-Zahl und
+kein Kronecker-Delta). Weil $\varepsilon$ herausfällt, hängt das Ergebnis nicht davon ab,
+\emph{wie} starr die Stäbe sind, nur davon, dass sie alle gleich starr sind. Deshalb existiert der
+Grenzwert. Passt die Temperatur dagegen nicht zu den abhängigen Zeilen ($\mu_i^T g \ne 0$), muss
+$\varepsilon\,\mu_i^T W \lambda$ einen festen Wert annehmen, und für $\varepsilon \to 0$ wird
+$\lambda$ unendlich groß. Das ist die unendliche Zwangskraft, zu der das Programm einen Hinweis
+zeigt.
+
+\emph{Wo die Ergänzungsenergie hineinspielt.} Die Gleichungen oben sind genau die Bedingung dafür,
+dass
+\[
+  \Pi^*(t) = \tfrac12\,\lambda^T W \lambda , \qquad \lambda = \lambda_p + \sum_i t_i\,\mu_i ,
+\]
+minimal wird, denn $\partial\Pi^*/\partial t_i = \mu_i^T W \lambda$. Das ist der Satz von Menabrea:
+Unter allen Kraftzuständen im Gleichgewicht stellt sich der mit der kleinsten Ergänzungsenergie
+ein. \enquote{Kleinste Ergänzungsenergie} ist dabei nur eine andere Schreibweise für
+\enquote{verträglich}, das KGV in \textbf{Statik} rechnet mit dem Prinzip der virtuellen Kräfte
+genau dasselbe. Die Ergänzungsenergie ist also kein zusätzliches Prinzip, sondern die
+Verträglichkeit in Energieform. Der Faktor $\varepsilon$ vor $\Pi^*$ ändert nichts daran, wo das
+Minimum liegt.
+
+\emph{$W$ ausrechnen} geht wie eine $\delta$-Zahl mit der Koppeltafel, mit $EA = EI = 1$ und für
+jeden Stab für sich (verschiedene Stäbe koppeln nicht):
+\begin{itemize}
+  \item Längszeile: $N = 1$ konstant, $\int N^2\,dx = L$.
+  \item Drehzeile: $M = 1$ konstant, $\int M^2\,dx = L$.
+  \item Querzeile: $M$ linear von $L$ auf $0$, $\int M^2\,dx = L^3/3$.
+  \item Dreh- mal Querzeile: $\int 1 \cdot (L - x)\,dx = L^2/2$. Längs- mal Biegezeile: $0$.
+\end{itemize}
+Die Querkraftverformung fehlt, wie überall im Programm (Euler-Bernoulli). Dass $EA$ und $EI$ beide
+$1$ sind, ist eine Annahme und keine Physik. Sie spielt keine Rolle, solange in einem
+Eigenspannungszustand nur dehnstarre oder nur biegestarre Zeilen vorkommen, denn dann kürzt sich der
+gemeinsame Faktor. Mischen sich beide, hängt die Aufteilung vom angenommenen Verhältnis $EA : EI$
+ab.
+
+So teilen sich zwei dehnstarre Stäbe nebeneinander eine Last je zur Hälfte, und ein starrer
+Zweifeldträger unter Gleichlast hat die bekannten Lagerkräfte $\frac38\,ql$, $\frac{10}8\,ql$,
+$\frac38\,ql$, genau wie mit dem KGV und dem Stützmoment als $X_1$. Eine gelbe Box weist darauf
+hin, dass diese Aufteilung angenommen ist, aber nur, wenn sie das Ergebnis auch ändert. Ist
+$\lambda_p$ auf allen Zeilen null, die über $W$ mit einem $\mu_i$ gekoppelt sind, dann ist
+$\delta_{i0} = \mu_i^T W \lambda_p = 0$ für \emph{jede} Wahl der Nachgiebigkeiten, also $t_i = 0$, egal wie
+starr die Stäbe im Verhältnis zueinander sind. Ein Beispiel ist eine starre Platte, die oben und
+unten auf Loslagern steht: Die Längskraft zwischen den beiden Lagern ist unbestimmt, aber ohne Last
+in Plattenrichtung immer null.
+
+\textbf{Das Gesamtbild.} Beide Aufteilungen in partikulär und homogen gehören zusammen. Die
+Kinematik $C\,u = g$ und das Gleichgewicht $C^T\lambda = r$ benutzen dieselbe Matrix, einmal so und
+einmal transponiert:
+
+\begin{center}
+\begin{tabular}{@{}p{2.9cm}p{5.9cm}p{5.9cm}@{}}
+  \toprule
+   & \textbf{Kinematik} $C\,u = g$ & \textbf{Gleichgewicht} $C^T\lambda = r$ \\
+  \midrule
+  partikulär       & $u_0$ (Temperatur) & $\lambda_p$ (Hauptsystem) \\
+  homogen          & $T\,u_r$: Bewegungen, die die starren Stäbe erlauben
+                   & $\sum_i t_i\,\mu_i$: Eigenspannungszustände \\
+  festgelegt durch & Gleichgewicht (Schritt~3) & Verträglichkeit \\
+  als Energie      & kleinste potentielle Energie & kleinste Ergänzungsenergie \\
+  wie im           & WGV & KGV \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Der Kern von $C$ sind die Bewegungen, die die starren Teile frei lassen. Der Kern von $C^T$ ist
+ihre statische Unbestimmtheit.
+
+Die rote Box \emph{Starrmodus \& statisch unbestimmt} kommt übrigens schon dann, wenn das System
+statisch unbestimmt ist und alle Stäbe $EA, EI \ge 10^7$ haben, also auch mit den
+Standardwerten.
+
+%---------------------------------------------------------------------
+\section{Das Rand-LGS: die Biegelinie wie von Hand}\label{sec:mathe-randlgs}
+
+Der Export \emph{Neue Biegelinie} rechnet unabhängig vom Weggrößenverfahren genau das, was ihr in
+\textbf{TM2} von Hand macht, nur für jedes System und mit allen Bedingungen auf einmal.
+
+\subsection{Ansatz je Stab}
+
+Mit $\varphi = -w'$, $Q' = -q$, $M' = Q - m$ und $N' = -n$ setzt das Programm für jeden Stab an
+
+\[
+  EI\,w(x) = w_p(x) + c_1\frac{x^3}{6} + c_2\frac{x^2}{2} + c_3 x + c_4, \qquad
+  EA\,u(x) = u_p(x) + C_1 x + C_2 .
+\]
+
+Das sind sechs Unbekannte je Stab. Die Partikulärlösungen baut es nicht aus einer Tabelle,
+sondern als Integral, das der CAS-Kern exakt auswertet:
+
+\begin{align*}
+  w_p(x) &= \int_0^x q(t)\,\frac{(x-t)^3}{6}\,dt + \int_0^x m(t)\,\frac{(x-t)^2}{2}\,dt
+            - EI\,\kappa_T\,\frac{x^2}{2}, \\
+  u_p(x) &= -\int_0^x n(t)\,(x-t)\,dt + EA\,\varepsilon_T\,x .
+\end{align*}
+
+Das ist die Faltung mit der Lösung für einen Einheitssprung. Deshalb funktioniert es für jede
+Lastfunktion, für Trapezlasten und für die globalen Linienlasten (die vorher auf Quer- und
+Längsrichtung des Stabes zerlegt werden). Und deshalb heißt die Integrationsvariable \code{t}, und
+ihr könnt \code{t} nicht als Symbol verwenden.
+
+Aus dem Ansatz folgen die Größen an beiden Stabenden als \emph{lineare} Ausdrücke in den
+Konstanten, am Anfang z.\,B.\ $w = c_4/EI$, $\varphi = -c_3/EI$, $M = -c_2$, $Q = -c_1$,
+$u = C_2/EA$, $N = C_1$.
+
+\subsection{Bedingungen an den Knoten}
+
+An jedem Knoten schreibt das Programm die Bedingungen, die ihr auch aufschreiben würdet, nur
+systematisch:
+
+\begin{itemize}
+  \item \textbf{Kinematik:} Alle Stabenden ohne N- bzw.\ Q-Gelenk haben dieselbe
+        Knotenverschiebung $\vec U$, also $u_e = \vec U\cdot\vec t_e$ und
+        $w_e = \vec U\cdot\vec n_e$, alle Enden ohne M-Gelenk dieselbe Verdrehung. $\vec U$ selbst
+        wird durch das erste passende Stabende ausgedrückt, damit keine zusätzlichen Unbekannten
+        entstehen.
+  \item \textbf{Gelenke:} Ein M-Gelenk gibt $M_e = 0$, ein N-Gelenk $N_e = 0$, ein Q-Gelenk
+        $Q_e = 0$.
+  \item \textbf{Lager:} In einer gehaltenen Richtung $\vec U\cdot\vec e = 0$, in einer freien
+        Richtung das Gleichgewicht der Stabendkräfte, Federn und Lasten in dieser Richtung. Die
+        Richtungen sind $\vec\xi = (\cos\alpha, -\sin\alpha)$ und $\vec\eta = (\sin\alpha, \cos\alpha)$,
+        so gehen gedrehte Lager ohne Sonderfall.
+  \item \textbf{Drehung:} Einspannung $\varphi = 0$, sonst $\sum M_e - c_m\,\varphi + M = 0$.
+\end{itemize}
+
+Am Ende muss die Anzahl der Gleichungen genau $6 \cdot (\text{Stäbe})$ sein (plus zwei je Knoten,
+an dem alle Stäbe über N- oder Q-Gelenke hängen, weil dort $\vec U$ eigene Unbekannte braucht).
+Sonst kommt \emph{nicht quadratisch}.
+
+\subsection{Lösen: erst wie von Hand, dann das CAS}
+
+Ein LGS mit 30 symbolischen Unbekannten direkt in \code{simult} zu stecken, ist auf dem Rechner
+langsam und liefert unübersichtliche Ausdrücke. Das Programm macht deshalb vorher, was ihr auch
+machen würdet:
+
+\begin{enumerate}
+  \item Jede Gleichung mit nur \emph{einer} Unbekannten wird sofort aufgelöst und der Wert überall
+        eingesetzt (z.\,B.\ $M = 0$ am Gelenk liefert direkt $c_2$). Das wiederholt sich, solange
+        etwas passiert.
+  \item Eine Unbekannte, die nur noch in einer einzigen Gleichung vorkommt, wird mit dieser
+        Gleichung beiseitegelegt und am Schluss aus ihr berechnet.
+  \item Gleichungen der Form $a\,x_j + b\,x_m = 0$ mit Zahlen $a$, $b$ werden zu $x_j = f\,x_m$
+        und eingesetzt.
+\end{enumerate}
+
+Was übrig bleibt, zerfällt oft in unabhängige Blöcke (Unbekannte, die nie zusammen in einer
+Gleichung stehen). Jeder Block wird einzeln mit \code{exact(simult(\dots))} gelöst, danach wird
+rückwärts eingesetzt. Aus demselben Protokoll entsteht auch \code{randbed}: Eine Größe steht dort
+nur dann als Wert, wenn ihre Konstanten in einem \emph{früheren} Schritt schon bekannt waren,
+also genau in der Reihenfolge, in der ihr es auf dem Papier bekommen würdet.
+
+\textbf{Die Aufteilung in \enquote{nur Biegelinie} und \enquote{nur Längslinie}} kommt aus
+demselben Protokoll: Das Programm verfolgt für jede Konstante der Biegelinie zurück, aus welchen
+Gleichungen sie bestimmt wurde. Tauchen darin keine Längslinien-Konstanten auf, die nicht schon
+vorher feststanden, reichen die Bedingungen der Biegelinie allein.
+
+Bei Rahmen mit dehnsteifen Stäben reicht das nicht. Dort bestimmt das LGS die Biegelinie zusammen
+mit $C_1$ und $C_2$ der dehnsteifen Stäbe, weil z.\,B.\ die Seitenverschiebung $u$ des Riegels in
+die Biegelinie der Stiele eingeht. Bei der direkten Methode ist $u = C_2$ und $N = C_1$ aber an
+beiden Stabenden dieselbe Unbekannte (ohne Längslast und Temperatur). Das Programm nimmt deshalb
+eine Bedingung, in der nur eine dieser Unbekannten steht, löst sie danach auf und setzt sie in die
+anderen Bedingungen ein, genau wie von Hand. Mathematisch ist das ein Gauß-Schritt mit dieser
+Unbekannten als Pivot, das LGS bleibt dabei regulär. Bleiben danach genau $4\cdot(\text{Stäbe})$
+Bedingungen übrig, in denen nur noch Konstanten der Biegelinie stehen, genügen sie für $w$. Bei
+dehnbaren Stäben ist $u(L) = (C_1 L + C_2)/EA$, dort hängt die Längsverschiebung am Stabende von
+beiden Konstanten ab, und das Durchreichen geht nicht.
+
+\subsection{Starre Stäbe im Rand-LGS: direkt oder Grenzwert}
+
+Für einen starren Stab gibt es kein $EI\,w'' = -M$ mehr, trotzdem braucht das Programm sechs
+Gleichungen. Zwei Wege:
+
+\begin{itemize}
+  \item \textbf{direkt} (Standard): Der biegesteife Stab bewegt sich als Starrkörper,
+        $w(x) = c_4 + c_3 x - \kappa_T x^2/2$ und beim dehnsteifen $u(x) = C_2 + \varepsilon_T x$.
+        $c_1$, $c_2$ und $C_1$ bleiben als reine Kraftgrößen stehen ($Q$, $M$, $N$ kommen weiter
+        aus ihnen und den Lasten) und werden aus dem Gleichgewicht bestimmt. Die Bedingungen sind
+        dieselben wie beim elastischen Stab.
+  \item \textbf{Grenzwert}: Jeder starre Stab bekommt $EI = 1/\varepsilon$ bzw.\
+        $EA = 1/\varepsilon$ (im CAS heißt $\varepsilon$ \code{rleps}), das System wird symbolisch in
+        $\varepsilon$ gelöst und danach \code{limit(\dots, rleps, 0)} gebildet.
+\end{itemize}
+
+Warum überhaupt der Grenzwert? Das direkte Verfahren wird singulär, wenn sich starre Teile
+\emph{gegenseitig} statisch unbestimmt halten. Beispiel: zwei dehnstarre Stäbe hintereinander
+zwischen zwei Festlagern, Horizontallast in der Mitte. Beide Stäbe ändern ihre Länge nicht, also
+ist $u = 0$ überall. Aber wie sich die Last auf die beiden Stäbe verteilt, sagt euch das
+Gleichgewicht nicht, nur $N_1 - N_2 = F$. Mit $EA = 1/\varepsilon$ ist das System regulär, und
+der Grenzwert $\varepsilon \to 0$ liefert die Aufteilung, die zwei \enquote{gleich starren} Stäben
+entspricht. Genau in diesem Fall wechselt das Programm von selbst auf den Grenzwert. In
+\code{randinfo} steht dann \emph{direkt singulär, starre Teile gegenseitig statisch unbestimmt}.
+
+\subsection{Knotenverschiebungen aus den Randwerten}\label{sec:mathe-knotenverschiebung}
+
+Für die Knotenverschiebung (Knotenmenü Seite~4) muss nichts Neues gelöst werden. Die
+Kinematik-Bedingungen drücken $\vec U$ ja schon durch ein Referenz-Stabende aus, und zwar durch das erste
+Stabende am Knoten ohne N- und Q-Gelenk. Dessen Längs- und Querverschiebung stehen nach dem Lösen
+fest, $u(0)$ und $w(0)$ am Stabanfang bzw.\ $u(L)$ und $w(L)$ am Stabende. Zurück ins globale
+System:
+\[
+  U_x = u\,t_x + w\,n_x, \qquad U_y = u\,t_y + w\,n_y, \qquad
+  \vec t = \frac{(\Delta x, \Delta y)}{L}, \quad \vec n = \frac{(-\Delta y, \Delta x)}{L} .
+\]
+Das sind dieselben $\vec t$ und $\vec n$ wie in den Bedingungen, deshalb zählt $U_y$ wie die
+$y$-Achse des Programms nach unten. Die Verdrehung kommt vom ersten Stabende ohne M-Gelenk,
+\[
+  \varphi = -w' = -\frac{w_p'(x) + c_1 x^2/2 + c_2 x + c_3}{EI},
+\]
+beim biegesteifen Stab $\varphi = \kappa_T x - c_3$. Hängen alle Stäbe über N- oder Q-Gelenke am
+Knoten, hat das LGS für ihn ohnehin die eigenen Unbekannten $u_x(K)$, $u_y(K)$, die werden direkt
+genommen.
+
+Damit das beim zweiten Knoten nicht wieder ein ganzes LGS kostet, hebt das Programm die Linien des
+letzten Rand-LGS mit einem Schlüssel auf: dem Fingerabdruck aller Eingaben (derselbe, an dem die
+Hinweisbox erkennt, ob sich etwas geändert hat; er enthält auch die Knoten- und Stabnummern) und
+den Schaltern, die das Rand-LGS sonst beeinflussen (Methode für starre Stäbe, symbolischer Modus,
+Zahlenformat). Passt der Schlüssel, werden nur die Randwerte eingesetzt, das sind drei kurze
+CAS-Aufrufe statt eines LGS. Gleicher Fingerabdruck heißt wirklich gleiches System, auch wenn ein
+Knoten zwischendurch gelöscht und genau so wieder eingebaut wurde. Werden dabei Nummern
+vertauscht, ändert sich der Fingerabdruck, und das ist auch richtig so: Dann gehören die Namen
+\code{wv1}, \code{wv2}, \dots\ zu anderen Stäben.
+
+%---------------------------------------------------------------------
+\section{Symbolischer Modus: rechnen mit Platzhaltern}\label{sec:mathe-symbolisch}
+
+Die Finite-Elemente-Rechnung für die Diagramme ist eine reine Zahlenrechnung. Symbolisch
+invertiert der Rechner keine Steifigkeitsmatrix in vernünftiger Zeit. Der Trick:
+
+\begin{enumerate}
+  \item Jedes Symbol bekommt einen \textbf{Platzhalterwert}, standardmäßig~1. Die Länge $l$
+        bekommt, wenn die Geometrie kein eigenes Symbol hat, den Rasterabstand.
+  \item \textbf{Superposition:} Alle Lasten werden auf null gesetzt und dann \emph{einzeln} wieder
+        eingeschaltet. Für jede Last rechnet das Programm die Stabendkräfte und teilt sie durch den
+        Platzhalter der Last und die passende Potenz von $l$. Übrig bleibt ein reiner
+        Zahlenfaktor~$c$:
+        \[
+          N = c\,F, \quad M = c\,F\,l \quad\text{(Einzellast)}, \qquad
+          N = c\,q\,l, \quad M = c\,q\,l^2 \quad\text{(Streckenlast)} .
+        \]
+        Die Steifigkeitsmatrix wird dafür nur einmal zerlegt, jede Last kostet dann nur noch ein
+        Vorwärts- und Rückwärtseinsetzen.
+  \item Der Zahlenfaktor wird \textbf{zurück in einen exakten Ausdruck} verwandelt (siehe unten)
+        und alle Anteile werden addiert.
+\end{enumerate}
+
+Das funktioniert, weil die Rechnung linear ist und alle Längen Vielfache von $l$ sind. Genau hier
+kommen die Einschränkungen her: Eine Temperatur passt nicht in das Schema \enquote{Last mal
+Länge hoch $k$} (deshalb fehlt sie in den Diagrammwerten, der Export hat sie), und ein Zahlen-$EI$
+neben einem symbolischen $EI$ macht die Steifigkeitsverhältnisse vom Platzhalterwert abhängig
+(deshalb der gelbe Hinweis). Die Stelle des Maximums in einem Feld sucht das Programm numerisch
+und rastet sie auf typische Werte wie $1/\sqrt 3$ oder einfache Brüche ein.
+
+\textbf{Aus einer Zahl wird wieder ein Bruch.} Aus $0{,}708333\ldots$ soll wieder
+$\frac{17}{24}$ werden. Dafür entwickelt das Programm die Zahl in einen \emph{Kettenbruch}
+$a_0 + \cfrac{1}{a_1 + \cfrac{1}{a_2 + \dots}}$ und nimmt den ersten Näherungsbruch, der bis
+auf $10^{-12}$ stimmt (Nenner höchstens 10\,000). Klappt das nicht und steht das Zahlenformat auf
+\emph{Wurzel/Bruch}, versucht es dasselbe mit dem \emph{Quadrat} der Zahl und zieht aus Zähler und
+Nenner die Quadratfaktoren heraus. So wird aus $0{,}7071\ldots$ wieder $\frac{\sqrt 2}{2}$ und
+aus $86{,}60\ldots$ ein $50\sqrt 3$. Scheitert beides, sucht es zuletzt noch einen Bruch mit
+kleinem Nenner (höchstens 100), der nur bis auf die eingestellte Toleranz $10^{-x}$ stimmen muss
+(Obermenü Seite~3, \emph{CAS Bruch-Tol.}). Das ist die einzige Stelle, an der diese Einstellung
+wirkt, und gerechnet wird dabei in Lua, nicht im CAS. Erst wenn auch das nicht klappt, bleibt eine
+Dezimalzahl stehen; im Format \emph{Dezimal} fallen alle drei Versuche weg.
+
+%---------------------------------------------------------------------
+\section{Kraftgrößenverfahren: Hauptsystem und \texorpdfstring{$\delta$}{delta}-Zahlen}\label{sec:mathe-kgv}
+
+\textbf{Das Hauptsystem} sucht das Programm \enquote{gierig}: Es löst der Reihe nach
+Einspannmomente, Lagerkräfte, Momente an biegesteifen Stabanschlüssen und zuletzt unbelastete
+Pendelstäbe. Es behält jede Lösung nur, wenn das System danach noch tragfähig ist (die
+Steifigkeitsmatrix lässt sich noch zerlegen). Sobald nichts mehr geht, ist das System statisch
+bestimmt, und die Anzahl der gelösten Bindungen ist der Grad $n$.
+
+\textbf{Die $\delta$-Zahlen} integriert das Programm nicht über $\int M_i M_j/(EI)\,dx$ (so rechnet
+ihr sie in \textbf{Statik} mit dem Prinzip der virtuellen Kräfte), sondern es
+rechnet für jeden Zustand ($X_j = 1$ bzw.\ Lastzustand) die Verformung des Hauptsystems mit dem
+Weggrößenverfahren und liest die zu $X_i$ gehörende Klaffung ab: Verschiebung am gelösten Lager,
+gegenseitige Verdrehung am eingefügten Gelenk, Längenänderung am gelösten Pendelstab. Nach
+Maxwell--Betti ist das dasselbe wie das Arbeitsintegral, inklusive der Anteile aus Normalkraft,
+Federn und endlichem $EA$, die man von Hand gern vergisst. Ein gelöster Pendelstab ist im
+Hauptsystem ganz entfernt. Seine eigene Längenänderung $L/(EA)$ fehlt deshalb in den
+Knotenverschiebungen und wird zu $\delta_{jj}$ addiert. Bei gedrehten Lagern liegen die
+Knotenfreiheitsgrade schon in Lagerrichtung ($u_\xi$, $u_\eta$), die Klaffung eines gelösten Lagers
+ist genau dieser Freiheitsgrad, und die Einheitskräfte eines gelösten Pendelstabes werden in
+diese Richtungen zerlegt.
+
+%---------------------------------------------------------------------
+\section{Polplan, Verschiebungszustand und Arbeitssatz}\label{sec:mathe-polplan}
+
+\subsection{Scheiben finden}
+
+Zuerst muss das Programm wissen, welche Stäbe zusammen eine starre Scheibe bilden. Das passiert
+in zwei Durchgängen:
+
+\begin{enumerate}
+  \item \textbf{Ohne Lager:} An jedem Knoten ohne Vollgelenk fasst das Programm alle Stäbe
+        zusammen, deren Enden dort kein Gelenk haben (\emph{Union-Find}: jede Gruppe hat einen
+        Vertreter, zwei Gruppen werden vereinigt, indem man einen Vertreter unter den anderen
+        hängt). Mit diesen Scheiben und nur den inneren Gelenken läuft der Polplan einmal durch.
+        Findet er zwei Scheiben, die gegeneinander unverschieblich sind, z.\,B.\ die drei Stäbe
+        eines Dreigelenk-Dreiecks, werden sie zu einer Scheibe zusammengefasst.
+  \item \textbf{Mit Lagern:} Stäbe, die biegesteif an einer Einspannung hängen (oder an einem
+        Festlager mit Drehfeder), gehören zur Scheibe~0, dem Boden. Mit diesen zusammengefassten
+        Scheiben und den Lagern entsteht der Polplan, den ihr seht.
+\end{enumerate}
+
+\subsection{Pole und Polstrahlen}
+
+An jedem Knoten schaut das Programm, welche Scheiben sich dort treffen und welche Relativbewegung
+zwischen ihnen möglich ist:
+
+\begin{longtable}{p{0.34\linewidth}p{0.60\linewidth}}
+  \toprule
+  \textbf{Verbindung} & \textbf{Folge im Polplan} \\
+  \midrule \endhead
+  M-Gelenk, Festlager & Pol im Knoten (Drehung möglich, keine Verschiebung) \\
+  Rollenlager & Polstrahl durch den Knoten senkrecht zur Rollrichtung, also entlang der
+    Lagerkraft \\
+  N- oder Q-Gelenk & Pol im Unendlichen (reine Verschiebung längs bzw.\ quer zum Stab) \\
+  Einspannung, biegesteifer Anschluss & kein Pol: die Scheiben sind starr verbunden \\
+  \bottomrule
+\end{longtable}
+
+Danach wiederholt das Programm (höchstens zehnmal) zwei Schritte, bis nichts Neues mehr dazukommt:
+
+\begin{enumerate}
+  \item \textbf{Satz von den drei Polen:} Für je drei Scheiben $i$, $j$, $k$ liegen die Pole
+        $(i,j)$, $(j,k)$ und $(i,k)$ auf einer Geraden. Sind zwei davon bekannt, entsteht ein
+        Polstrahl für den dritten. Liegt einer der beiden im Unendlichen, geht der Strahl durch
+        den anderen in dessen Richtung.
+  \item \textbf{Strahlen schneiden:} Zwei Polstrahlen derselben Scheibenpaarung schneiden sich im
+        Pol. Sind sie parallel, liegt der Pol im Unendlichen in dieser Richtung.
+\end{enumerate}
+
+Findet es für eine Paarung zwei verschiedene Pole, oder liegt ein Pol nicht auf einem Strahl, auf
+dem er liegen müsste, sind die beiden Scheiben gegeneinander unverschieblich (im Polplan rot). Im
+Durchgang ohne Lager werden solche Paare zu einer Scheibe zusammengefasst (siehe oben).
+
+\subsection{Der Verschiebungszustand}
+
+Eine Scheibe, die sich um ihren Hauptpol $(c_x, c_y)$ um den kleinen Winkel $\varphi$ dreht,
+verschiebt jeden Punkt um $\vec r_\perp \varphi$, also senkrecht zum Fahrstrahl vom Pol. Das
+Programm gibt einer Startscheibe $\varphi = 1$ (bevorzugt eine, deren Hauptpol auf einem Knoten
+liegt) und reicht die Bewegung über die Nebenpole weiter: Der Nebenpol $(A,B)$ ist der Punkt, der
+auf beiden Scheiben dieselbe Verschiebung hat. Kennt man die Verschiebung dieses Punktes aus
+Scheibe~$A$ und den Hauptpol von Scheibe~$B$, folgt $\varphi_B$. Hat eine Scheibe ihren Hauptpol im
+Unendlichen, verschiebt sie sich nur. Ein Widerspruch (Nebenpol gleich Hauptpol, aber eine
+Verschiebung ungleich null) heißt: Diese Startscheibe geht nicht, das Programm nimmt die nächste.
+
+\subsection{Der Arbeitssatz}\label{sec:mathe-arbeitssatz}
+
+Nach dem Lösen einer Bindung ist das System eine kinematische Kette mit genau einem Freiheitsgrad.
+Für jede virtuelle Bewegung, die die übrigen Bindungen zulassen, gilt
+\[
+  \delta W = \sum_k \vec F_k \cdot \delta\vec u_k + \sum_m M_m\,\delta\varphi_m = 0 ,
+\]
+und weil es nur einen Freiheitsgrad gibt, sind alle Wege Vielfache eines einzigen Parameters. Der
+Export (Abschnitt~\ref{sec:arbeitssatz}) macht daraus drei Schritte.
+
+\textbf{Weg einer Kraft (\code{pvv\_kin}, Spalte~2).} Eine Kraft mit Richtung
+$\vec e = (e_x, e_y)$ ($y$ nach unten) greift im Punkt $P$ auf Scheibe~$i$ an. Ihr Weg ist die
+Verschiebung von $P$ in Richtung $\vec e$:
+\begin{itemize}
+  \item Scheibe~$i$ dreht um ihren Hauptpol $(c_x, c_y)$ um $\varphi_i$ (gegen den Uhrzeigersinn).
+        Jeder Punkt bewegt sich senkrecht zum Fahrstrahl, projiziert auf $\vec e$ ist das
+        \[
+          \delta_e = \varphi_i\,\bigl[e_x\,(P_y - c_y) - e_y\,(P_x - c_x)\bigr] .
+        \]
+        Die eckige Klammer ist der Hebel der Kraft um den Pol.
+  \item Scheibe~$i$ verschiebt sich nur (Hauptpol im Unendlichen) um $\delta_i$ in Richtung
+        $\vec t_i$: $\delta_e = \delta_i\,(\vec e\cdot\vec t_i)$.
+  \item Ein Moment auf Scheibe~$i$ arbeitet am Drehwinkel: $\delta\varphi = \varphi_i$.
+\end{itemize}
+Streckenlasten dürfen exakt durch ihre Resultierende $R$ ersetzt werden: Auf einer starren
+Scheibe ist die Verschiebung linear in der Bogenlänge $s$, also
+$\int q(s)\,\vec e\cdot\delta\vec u(s)\,ds = R\;\vec e\cdot\delta\vec u(s_R)$ mit dem
+Angriffspunkt $s_R$ der Resultierenden. Die freigesetzte Größe ist eine äußere Last in der
+gezeichneten Richtung, bei einem gelösten Gelenk arbeitet sie an der gegenseitigen Verdrehung
+bzw.\ Verschiebung der beiden Seiten.
+
+\textbf{Verhältnis der Scheiben (\code{pvv\_pol}).} Der Nebenpol $P_{AB}$ ist der Punkt, der auf
+Scheibe~$A$ und Scheibe~$B$ dieselbe Verschiebung hat. Schreibt man diese Verschiebung mit der
+Formel oben einmal über $A$ und einmal über $B$ hin, entsteht eine lineare Beziehung
+$\varphi_B = \kappa_{AB}\,\varphi_A$; eine Komponente reicht, das Programm nimmt die größere. Liegt
+der Nebenpol zweier drehender Scheiben im Unendlichen, drehen beide gleich, $\varphi_A = \varphi_B$.
+Von der Bezugsscheibe aus (der Startscheibe des Verschiebungszustands, ihr Winkel heißt
+$\varphi_0$) laufen diese Beziehungen über die Nebenpole durch alle Scheiben und liefern
+$\varphi_i = \kappa_i\,\varphi_0$. Das sind die unteren Zeilen von \code{pvv\_kin}. Gibt es mehr
+Nebenpole als nötig, sind die übrigen Proben.
+
+\textbf{Einsetzen (\code{w\_eq2}).} Mit $\varphi_i = \kappa_i\,\varphi_0$ wird jeder Weg zu
+$h_k\,\kappa_{i(k)}\,\varphi_0$ (Spalte~3 von \code{pvv\_kin}), und der Arbeitssatz zerfällt in
+\[
+  \delta W = \varphi_0 \Bigl(\sum_k F_k\,h_k\,\kappa_{i(k)} + \sum_m M_m\,\kappa_{i(m)}\Bigr) = 0 .
+\]
+Da $\varphi_0$ beliebig ist, muss die Klammer verschwinden. Sie ist linear in der freigesetzten
+Größe, also eine Gleichung mit einer Unbekannten. Verschiebt sich die Bezugsscheibe nur, steht
+$\delta_0$ statt $\varphi_0$ da, und die Faktoren der Drehwinkel haben die Einheit $1/$Länge.
+Intern zählt das Programm Drehwinkel im Uhrzeigersinn; im Export ist das Vorzeichen umgedreht,
+damit alles zur Konvention der Vorlesung (gegen den Uhrzeigersinn positiv) passt.
+
+%---------------------------------------------------------------------
+\section{Gleichgewicht der Teilsysteme (LGS-Matrix)}\label{sec:mathe-gleichgewicht}
+
+Für den Export \emph{LGS-Matrix} schneidet das Programm das System an allen Gelenken auf, genau
+so, wie Seite~2 der Explosionszeichnung es zeigt. Beide benutzen dieselben drei Regeln im Code:
+\code{gelenkKnoten} (welche Stäbe hängen mit Gelenk, welche biegesteif am Knoten, wie viele
+Teilsysteme treffen sich), \code{gelenkRichtung} (positive Richtung der Gelenkgrößen) und
+\code{lastStabKnoten} (an welchem Teilsystem Lasten und Lager eines Gelenkknotens hängen). Jedes
+Teilsystem liefert drei Gleichungen: Kräfte nach rechts, nach oben und Momente gegen den
+Uhrzeigersinn. Unbekannt sind die Lagerreaktionen und die Größen, die ein Gelenk überträgt: beim
+M-Gelenk die beiden Kraftkomponenten $Gx$, $Gy$, beim N-Gelenk $Gq$ und $Gm$, beim Q-Gelenk $Gn$
+und $Gm$. Treffen sich mehr als zwei Teilsysteme in einem Gelenk, bekommt jeder Gelenkstab eigene
+Gelenkkräfte, gibt es dort keinen biegesteifen Rest, sagen zwei zusätzliche Gleichungen, dass der
+Gelenkbolzen selbst im Gleichgewicht ist. Im symbolischen Modus stehen Lasten mit ihren Namen und
+Hebelarme als Vielfache von $l$ in der Matrix.
+
+Den \textbf{Momentenbezugspunkt} wählt das Programm so, wie ihr es in \textbf{TM1} lernt: Es
+sucht den Punkt, durch den möglichst viele unbekannte Kräfte gehen, also die senkrechte Linie mit den
+meisten unbekannten Vertikalkräften und die waagerechte mit den meisten unbekannten
+Horizontalkräften, am liebsten ein Knoten, der auf beiden liegt. Die Momentengleichung wird dadurch
+so kurz wie möglich.
+
+Das Programm löst dieses LGS nicht selbst, das macht ihr mit den oben beschriebenen Befehlen. Die Werte auf Seite~1
+der Explosionszeichnung kommen aus dem Weggrößenverfahren und müssen dieselben sein. Das ist
+eure Kontrolle.
+
+\textbf{Resultierende von Streckenlasten:} $R = \int_0^L q\,dx$ und das statische Moment
+$S = \int_0^L q\,x\,dx$ um den Stabanfang, die Wirkungslinie liegt bei $x_R = S/R$. Für Trapezlasten
+sind das die bekannten Formeln, für Lastfunktionen integriert das Programm mit der Simpsonregel
+über elf Stützstellen. Die ist für $q\,x$ bis zu einem quadratischen $q$ exakt.
+
+%---------------------------------------------------------------------
+\section{Querschnittswerte}\label{sec:mathe-qswerte}
+
+\textbf{Vielecke} (Rechteck, Dreieck, Trapez, Polygon, dicke Linie) rechnet das Programm alle mit
+derselben Formel, der Gaußschen Trapezformel. Mit den Eckpunkten $(y_i, z_i)$ gegen den
+Uhrzeigersinn und $c_i = y_i z_{i+1} - y_{i+1} z_i$ ist
+\[
+  A = \tfrac12 \sum c_i, \qquad
+  y_S = \frac{\sum (y_i + y_{i+1})\,c_i}{6A}, \qquad
+  \int z^2\,dA = \tfrac1{12} \sum \left(z_i^2 + z_i z_{i+1} + z_{i+1}^2\right) c_i ,
+\]
+entsprechend für $z_S$, $\int y^2\,dA$ und $\int yz\,dA$. Das ist exakt, es ist der Gaußsche
+Integralsatz, angewandt auf die Randkanten. Deshalb ist es auch egal, wie kompliziert das Vieleck
+ist, solange es sich nicht selbst schneidet.
+
+\textbf{Kreisausschnitt und -abschnitt} mit halbem Öffnungswinkel $\alpha$: Der Schwerpunkt liegt
+auf der Winkelhalbierenden im Abstand $\frac{2R\sin\alpha}{3\alpha}$ (Ausschnitt) bzw.\
+$\frac{4R\sin^3\alpha}{3(2\alpha - \sin 2\alpha)}$ (Abschnitt). Die Trägheitsmomente werden erst um
+die Winkelhalbierende bestimmt (beim Abschnitt wird das Dreieck zum Mittelpunkt abgezogen) und dann
+ins KOS gedreht.
+
+\textbf{Dünnwandige Linien} sind Mittellinie mal Dicke: $A = L\,t$,
+$I_y = t L^3 \sin^2\beta/12$ usw. Den Eigenanteil $L t^3/12$ lässt das Programm weg, genau wie
+die Vorlesung, weil er von höherer Ordnung in $t$ ist. \textbf{Dünnwandige Kreise und Bögen}
+ebenso: $A = R\,\Delta\varphi\,t$, $I_y = R^3 t \int \sin^2\varphi\,d\varphi$ um den Mittelpunkt
+(Vollkreis $\pi R^3 t$), Schwerpunkt des Bogens im Abstand $R\,\frac{\sin(\Delta\varphi/2)}{\Delta\varphi/2}$
+auf der Winkelhalbierenden.
+
+\textbf{Löcher} gehen mit negativer Fläche in die Summen ein, danach setzt der Satz von Steiner alles
+zusammen. \textbf{Numerisch addierte} Elemente legt das Programm auf ein Raster von $40 \times 40$
+Zellen über ihr umschreibendes Rechteck und zählt nur die Zellen, die nicht schon in einem anderen
+Element liegen. Deshalb die Warnung, das ist eine Näherung.
+
+\textbf{Hauptachsen:} Mit $m = \frac{I_y + I_z}2$ und
+$d = \sqrt{\left(\frac{I_y - I_z}2\right)^2 + I_{yz}^2}$ ist $I_{1,2} = m \pm d$ und
+\[
+  \alpha = \tfrac12 \operatorname{atan2}(2 I_{yz},\ I_y - I_z) .
+\]
+Das \code{atan2} (der Arkustangens, der das Vorzeichen von Zähler und Nenner kennt) sorgt dafür,
+dass $\alpha$ immer zur Achse~1 mit $I_1$ gehört. Mit dem einfachen $\tan 2\alpha$ aus der
+Formelsammlung müsstet ihr das von Hand prüfen, dort kann auch die Achse mit $I_2$ herauskommen.
+
+\textbf{Widerstandsmomente} $W = I/e$ nehmen als Randabstand $e$ den größten Abstand der Elemente
+vom Schwerpunkt. Bei dünnwandigen Elementen ist das die Mittellinie, $t/2$ kommt nicht dazu.
+
+%---------------------------------------------------------------------
+\section{Normalspannung und neutrale Faser}\label{sec:mathe-sigma}
+
+Mit $\Delta = I_y I_z - I_{yz}^2$ und $y$, $z$ vom Schwerpunkt aus rechnet das Programm immer mit
+\[
+  \sigma_x = \frac NA + \frac{M_y I_z - M_z I_{yz}}{\Delta}\,z
+                      - \frac{M_z I_y - M_y I_{yz}}{\Delta}\,y .
+\]
+Für $I_{yz} = 0$ bleibt das bekannte $\frac NA + \frac{M_y}{I_y} z - \frac{M_z}{I_z} y$ übrig. Die
+Formel kommt direkt aus $M_y = \int \sigma z\,dA$ und $M_z = -\int \sigma y\,dA$ mit dem
+linearen Ansatz $\sigma = a + b\,y + c\,z$, also zwei Gleichungen für $b$ und $c$.
+
+Weil $\sigma_x$ linear in $y$ und $z$ ist, speichert das Programm nur den Gradienten $(c_y, c_z)$ und
+den Wert $c_0$ im Ursprung des gezeigten KOS. Daraus entstehen beide Gleichungen in der Tabelle: die
+KOS-Form direkt, die HAS-Form, indem der Gradient um den Hauptachsenwinkel gedreht wird. Die
+neutrale Faser ist die Gerade $c_0 + c_y y + c_z z = 0$.
+
+Die \textbf{Extremwerte} sucht das Programm nur an den Eckpunkten des Querschnitts (Bögen alle
+$10^\circ$ abgetastet). Eine lineare Funktion hat ihr Maximum immer in einer Ecke der konvexen
+Hülle. Bei dünnwandigen Profilen sind das die Endpunkte der Mittellinien, also wieder die
+Näherung aus der Vorlesung.
+
+%---------------------------------------------------------------------
+\section{Schubfluss in dünnwandigen Profilen}\label{sec:mathe-schub}
+
+\subsection{Offene Profile}
+
+Aus den dünnwandigen Linien baut das Programm einen \emph{Profilgraph}: Die Linien werden an
+Kreuzungen, Berührpunkten und an den Schwerachsen geteilt, Punkte, die zusammenfallen, werden ein
+Knoten. Dann läuft es los:
+
+\begin{itemize}
+  \item An jedem \textbf{freien Ende} ist der Schubfluss null, dort beginnt ein Pfad mit
+        $S_y = S_z = 0$.
+  \item Entlang eines Segments werden die statischen Momente aufintegriert,
+        $S_z \mathrel{+}= (y - y_S)\,t\,\Delta s$ und $S_y \mathrel{+}= (z - z_S)\,t\,\Delta s$. Weil
+        der Integrand auf einer geraden Linie linear ist, ist das mit der Mittelpunktsregel exakt.
+        $S$ selbst ist quadratisch in $s$.
+  \item An einer \textbf{Verzweigung} gilt das Knotengleichgewicht: Kommen alle Äste bis auf einen an,
+        startet der letzte mit der Summe der ankommenden statischen Momente.
+\end{itemize}
+
+Aus den statischen Momenten folgt der Schubfluss mit der gekoppelten Formel
+\[
+  \tau\,t = -\frac{Q_y\,(I_y S_z + I_{yz} S_y) + Q_z\,(I_z S_y + I_{yz} S_z)}{I_y I_z - I_{yz}^2} ,
+\]
+die für $I_{yz} = 0$ in das bekannte $\tau = -\frac{Q_z S_y}{I_y t}$ bzw.\ $-\frac{Q_y S_z}{I_z t}$
+zerfällt. $\tau$ ist positiv in Laufrichtung $s$.
+
+\subsection{Eine geschlossene Zelle: woher kommt \texorpdfstring{$q_0$}{q0}?}\label{sec:mathe-zelle}
+
+Eine Zelle hat kein freies Ende, an dem der Schubfluss null sein müsste. Das Programm schneidet sie
+deshalb an einer Stelle auf, rechnet wie beim offenen Profil und bekommt einen Verlauf, der sich
+vom richtigen nur um einen \textbf{konstanten Umlaufanteil} $q_0$ unterscheidet. Diesen bestimmt
+es auf zwei Wegen:
+
+\textbf{(a) Symmetrie.} Liegt eine Symmetrieachse parallel zur Querkraft, ist der richtige Verlauf
+antisymmetrisch und auf der Achse null. Das Programm schneidet die Zelle deshalb möglichst auf der
+Achse auf. Klappt das nicht genau, verschiebt es den Umlaufanteil so, dass ein Punkt und sein
+Spiegelpunkt entgegengesetzt gleiche Werte haben. Die Symmetrie selbst prüft es, indem es jede
+Linie an 13 Stellen abtastet und schaut, ob der gespiegelte Punkt wieder auf einer Linie gleicher
+Dicke liegt.
+
+\textbf{(b) Verträglichkeit.} Ohne passende Symmetrieachse kommt die Bedingung, dass sich die Zelle
+unter einer Querkraft im Schubmittelpunkt nicht verdrillt:
+\[
+  \oint \frac{q}{G\,t}\,ds = 0 .
+\]
+Der Kniff ist, diese Bedingung nicht für die gerade eingegebene Querkraft zu lösen, sondern für
+die statischen Momente selbst. Dazu sortiert man die Formel für den Schubfluss nach $S_z$ und $S_y$:
+\[
+  q = -\frac{a\,S_z + b\,S_y}{\Delta} , \qquad
+  \begin{pmatrix} a \\ b \end{pmatrix}
+  = \underbrace{\begin{pmatrix} I_y & I_{yz} \\ I_{yz} & I_z \end{pmatrix}}_{J}
+    \begin{pmatrix} Q_y \\ Q_z \end{pmatrix} ,
+\]
+mit $\Delta = I_y I_z - I_{yz}^2 = \det J$. $a$, $b$, $G$ und $\Delta$ sind entlang der Zelle
+konstant, also wird die Verträglichkeit zu
+\[
+  a \oint \frac{S_z}{t}\,ds + b \oint \frac{S_y}{t}\,ds = 0 .
+\]
+\emph{Warum $J$ regulär sein muss.} Die statischen Momente hängen nur vom Querschnitt ab, nicht von
+der Last. Sollen sie für \emph{jede} Querkraft den richtigen Schubfluss liefern, muss die Gleichung
+oben für jedes $(Q_y, Q_z)$ gelten. Weil $J$ regulär ist, gibt es zu jedem gewünschten Paar
+$(a, b)$ eine Querkraft, die es erzeugt, nämlich $(Q_y, Q_z)^T = J^{-1}(a, b)^T$. Man darf also
+$(a, b) = (1, 0)$ und $(a, b) = (0, 1)$ einsetzen und bekommt die beiden Bedingungen einzeln:
+\[
+  \oint \frac{S_z}{t}\,ds = 0 \quad\text{und}\quad \oint \frac{S_y}{t}\,ds = 0 .
+\]
+Wäre $J$ singulär, lägen alle Paare $(a, b)$, die überhaupt vorkommen können, auf einer Geraden durch
+den Ursprung. Dann wüsste man nur, dass eine bestimmte Kombination der beiden Umlaufintegrale
+verschwindet, und könnte die beiden statischen Momente nicht einzeln festlegen.
+
+Regulär ist $J$ bei jedem echten Querschnitt: Nach der Cauchy-Schwarz-Ungleichung aus \textbf{HM1}
+ist $I_{yz}^2 = \bigl(\int y z\,dA\bigr)^2 \le \int y^2\,dA \int z^2\,dA = I_z I_y$, also
+$\Delta \ge 0$. Gleichheit gibt es nur, wenn die ganze Fläche auf einer Geraden durch den Schwerpunkt
+liegt, und dann versagt schon die Biegeformel, in der $\Delta$ im Nenner steht.
+
+Streng genommen braucht man die Regularität nur für diese Richtung des Schlusses. Dass zwei
+einzeln verschobene statische Momente für jede Querkraft den richtigen Schubfluss liefern, folgt
+schon daraus, dass $q_0 = -\oint (q_{\text{offen}}/t)\,ds \big/ \oint ds/t$ linear in $a$ und $b$
+ist, also in einen Teil zu $S_z$ und einen zu $S_y$ zerfällt. Die Regularität sagt zusätzlich, dass
+es keine andere Wahl der beiden Konstanten gibt. Deshalb sind auch die angezeigten $S$-Verläufe
+eindeutig.
+
+Das Programm verschiebt also jedes statische Moment in der Zelle um seine eigene Konstante $s_0$.
+Aus $\oint (S + s_0)/t\,ds = 0$ folgt
+\[
+  s_0 = -\,\frac{\oint S/t\;ds}{\oint ds/t}
+\]
+(beide Integrale im Umlaufsinn gegen den Uhrzeigersinn). Damit stimmen nicht nur $\tau$, sondern
+auch die angezeigten $S$-Verläufe. Integriert wird mit der Simpsonregel, die für das quadratische
+$S/t$ exakt ist. Beim symmetrischen Profil kommt so übrigens genau die antisymmetrische Lösung aus
+(a) heraus.
+
+\subsection{Schubmittelpunkt}
+
+Der Schubmittelpunkt ist der Punkt, durch den die Resultierende des Schubflusses geht. Das
+Programm rechnet den Schubfluss für die Einheitslasten $Q_y = 1$ und $Q_z = 1$ (bei einer Zelle
+inklusive $q_0$) und dessen Moment um den Schwerpunkt,
+\[
+  M_q = \int \left[(y - y_S)\,t_z - (z - z_S)\,t_y\right] q\,ds ,
+\]
+mit der Tangentenrichtung $(t_y, t_z)$ der Linie. Weil dasselbe Moment aus der Querkraft im
+Schubmittelpunkt kommen muss, $M_q = (y_M - y_S)\,Q_z - (z_M - z_S)\,Q_y$, ist
+\[
+  y_M = y_S + M_q(Q_z = 1), \qquad z_M = z_S - M_q(Q_y = 1) .
+\]
+Der Integrand ist kubisch in $s$, die Simpsonregel also wieder exakt. Die Momententabelle zeigt
+genau diese Summe, aufgeteilt nach Elementen.
+
+\subsection{Massive Querschnitte}
+
+Für $\tau = \frac{Q\,S}{I\,b}$ teilt das Programm den Querschnitt in 160 waagerechte (bzw.\
+senkrechte) Streifen. Für jeden Streifen bestimmt es die Breite $b(z)$ über alle Elemente (Löcher
+abgezogen, Polygone über die Schnittpunkte der Kanten, Kreise über $2\sqrt{R^2 - \Delta^2}$) und
+summiert $S(z)$ von oben auf. Wirken $Q_y$ und $Q_z$ gleichzeitig, ist das angezeigte $\tau_{max}$
+$\sqrt{\tau_{y,max}^2 + \tau_{z,max}^2}$, also eine Abschätzung nach oben, denn die beiden Maxima
+liegen meist nicht an derselben Stelle.
+
+%---------------------------------------------------------------------
+\section{Torsion und Verwölbung}\label{sec:mathe-torsion}
+
+\textbf{Torsion:} Beim offenen Profil ist $I_T = \sum \frac{\xi}{3} L\,t^3$ und
+$\tau = M_T\,t/I_T$. Bei einer Zelle kommt die Fläche $A_m$ der Mittellinie aus der Gaußschen
+Trapezformel und $\oint ds/t = \sum L_i/t_i$, damit $I_T = 4A_m^2/\oint ds/t$ und
+$\tau = M_T/(2A_m t)$.
+
+\textbf{Zelle mit offenen Ästen} (z.\,B.\ ein Kasten mit überstehenden Gurten): Die Zelle trägt
+nach Bredt das ganze $M_T$, und $I_T$ ist ihr Bredt-Wert. Daraus folgt die Verdrillung
+$\vartheta = M_T/(G\,I_T)$, und die offenen Äste müssen sich genauso verdrillen wie die Zelle. Ein
+Ast der Dicke $t$ hat dann am Rand $\tau = G\,\vartheta\,t = M_T\,t/I_T$. Streng genommen nehmen die
+Äste damit zusätzlich das Moment $G\,\vartheta\,I_{T,\text{offen}}$ auf, und alle Schubspannungen
+zusammen ergeben $M_T\,(1 + I_{T,\text{offen}}/I_{T,\text{Zelle}})$ statt $M_T$. Das ist eine
+Näherung: $I_{T,\text{offen}}$ wächst mit $t^3$, $I_{T,\text{Zelle}}$ mit $A_m^2$, und der
+Unterschied liegt bei üblichen Profilen im Promillebereich. Bei einem Kasten $200 \times 100$ mit
+$t = 10$ und zwei $50$ langen Gurten derselben Dicke sind es etwa $0{,}1\,\%$. Genauso lässt Bredt
+den kleinen offenen Anteil $\frac13 L\,t^3$ der Zellwände selbst weg. Exakt im Gleichgewicht wäre
+$I_T = I_{T,\text{Zelle}} + I_{T,\text{offen}}$ mit einer Aufteilung von $M_T$ im Verhältnis der
+beiden Steifigkeiten.
+
+Ein
+dünnwandiges Kreisrohr ist die Zelle mit $A_m = \pi R^2$ und $\oint ds/t = 2\pi R/t$, also
+$I_T = 2\pi R^3 t$. Der Schubgraph kennt nur gerade Linien, deshalb erkennt das Programm das Rohr
+gesondert. Das Torsionsmoment
+aus platzierten Kräften ist das Moment um den \emph{Schubmittelpunkt}, denn um den dreht sich der
+Querschnitt.
+
+\textbf{Verwölbung:} Auf einem geraden Segment ist der Fahrstrahlabstand $r_\perp$ linear, damit
+ist die Verwölbung nach Formelsammlung geschlossen integrierbar:
+\[
+  u_x(s) = u_{x,0} + \frac{q_T}{G\,t}\,s - \vartheta\left[r_1 s + (r_2 - r_1)\frac{s^2}{2L}\right],
+  \qquad q_T = \frac{M_T}{2A_m}, \quad \vartheta = \frac{M_T}{G\,I_T} ,
+\]
+wobei der Bredt-Anteil $q_T/(Gt)$ nur in der Zelle auftritt (mit Vorzeichen je nach Umlaufsinn).
+Das Programm läuft von einem Knoten auf einer Symmetrieachse aus (dort ist $u_x$ bei symmetrischen
+Profilen null) über den Profilgraph und setzt die Werte Segment für Segment fort. Beim Schließen der
+Zelle muss es wieder beim Startwert ankommen, weil $\oint r_\perp\,ds = 2A_m$ ist. Das ist die
+eingebaute Probe. Zum Schluss wird die Konstante so gewählt, dass $\int u_x\,t\,ds = 0$ ist, also
+keine mittlere Längsverschiebung übrig bleibt.
+
+%---------------------------------------------------------------------
+\section{Kernfläche}\label{sec:mathe-kern}
+
+Die Kernfläche ist die Menge aller Lastpunkte, deren neutrale Faser den Querschnitt nicht
+schneidet. Gerechnet wird rückwärts:
+
+\begin{enumerate}
+  \item Das Programm sammelt die Eckpunkte des Querschnitts (Bögen abgetastet) und bildet ihre
+        \textbf{konvexe Hülle}. Einbuchtungen spielen keine Rolle, denn eine Gerade, die die Hülle
+        berührt, berührt auch den Querschnitt nicht innen.
+  \item Jede Kante der Hülle ist eine mögliche \textbf{neutrale Faser}. Mit dem nach außen
+        zeigenden Einheitsvektor $\vec n$ der Kante und ihrem Abstand $d$ vom Schwerpunkt gehört
+        dazu der Lastpunkt (der \emph{Antipol})
+        \[
+          \vec e = -\frac{1}{A\,d}
+          \begin{pmatrix} I_z & -I_{yz} \\ -I_{yz} & I_y \end{pmatrix} \vec n .
+        \]
+        Für ein Rechteck und die obere Kante ist $\vec n = (0,1)$, $d = h/2$, und es kommt
+        $e_z = -h/6$ heraus, das bekannte Kerndrittel.
+  \item Die Kernpunkte aller Kanten, der Reihe nach verbunden, sind die Kernfläche. An Bögen legt
+        das Programm alle $5^\circ$ eine Tangente an, beim Vollkreis 36 Stück.
+\end{enumerate}
+
+\textbf{Woher die Matrix kommt.} Die Formel für $\vec e$ ist die Formel für $\sigma_x$ aus
+Abschnitt~\ref{sec:mathe-sigma}, rückwärts gelesen. Eine Normalkraft $N$ im Punkt
+$\vec e = (e_y, e_z)$, gemessen vom Schwerpunkt, erzeugt $M_y = N e_z$ und $M_z = -N e_y$. In
+$\sigma_x$ eingesetzt und nach $y$ und $z$ sortiert:
+\[
+  \sigma_x = \frac NA + \frac N\Delta\Bigl[\bigl(I_y e_y + I_{yz} e_z\bigr)\,y
+                                       + \bigl(I_{yz} e_y + I_z e_z\bigr)\,z\Bigr]
+           = \frac NA\Bigl(1 + \frac A\Delta\,\vec x^T J\,\vec e\Bigr) ,
+\]
+mit $\vec x = (y, z)$ und der Trägheitsmatrix $J = \begin{pmatrix} I_y & I_{yz} \\ I_{yz} & I_z
+\end{pmatrix}$, $\Delta = \det J$. Die neutrale Faser ist $\sigma_x = 0$, also die Gerade
+\[
+  \vec x^T \Bigl(\frac A\Delta\,J\,\vec e\Bigr) = -1 .
+\]
+Die Kante mit dem nach außen zeigenden Einheitsvektor $\vec n$ und dem Abstand $d$ vom Schwerpunkt
+ist die Gerade $\vec x^T \vec n = d$, oder genauso $\vec x^T(-\vec n/d) = -1$. Eine Gerade, die
+nicht durch den Schwerpunkt geht, lässt sich nur auf eine Weise in der Form $\vec x^T \vec g = -1$
+schreiben. Die neutrale Faser ist also genau dann die Kante, wenn die beiden Vektoren gleich sind:
+\[
+  \frac A\Delta\,J\,\vec e = -\frac{\vec n}{d}
+  \qquad\Longrightarrow\qquad
+  \vec e = -\frac{1}{A\,d}\,\bigl(\Delta\,J^{-1}\bigr)\,\vec n ,
+  \qquad
+  \Delta\,J^{-1} = \begin{pmatrix} I_z & -I_{yz} \\ -I_{yz} & I_y \end{pmatrix} .
+\]
+Die Matrix in der Formel ist also die Inverse der Trägheitsmatrix ohne den Vorfaktor $1/\det J$
+(Diagonale vertauscht, Nebendiagonale mit anderem Vorzeichen). Auch hier braucht man, dass $J$
+regulär ist, siehe Abschnitt~\ref{sec:mathe-zelle}.
+
+\textbf{Warum man die Kernpunkte geradlinig verbinden darf.} Dreht man die neutrale Faser um eine
+Ecke $\vec P$ der Hülle von einer Kante zur nächsten, gehen alle diese Geraden durch $\vec P$, also
+gilt $\vec P^T(\vec n/d) = 1$. Der Vektor $\vec n/d$ wandert damit auf einer Geraden, und weil
+$\vec e$ linear von $\vec n/d$ abhängt, wandert auch der Lastpunkt auf einer Geraden. Jeder Ecke der
+Hülle entspricht so eine gerade Kante der Kernfläche, jeder Kante der Hülle eine Ecke.
+
+Im Hauptachsensystem fällt die Kopplung weg ($I_{\eta\zeta} = 0$). Schreibt man die Kante mit
+ihren Achsenabschnitten als $\eta/a_\eta + \zeta/a_\zeta = 1$, ist $\vec n/d = (1/a_\eta,
+1/a_\zeta)$, und aus der Formel wird die bekannte Form $\eta_K = -i_\zeta^2/a_\eta$,
+$\zeta_K = -i_\eta^2/a_\zeta$ mit $i^2 = I/A$. Deshalb beschriftet das
+Programm die umhüllenden Geraden mit ihren Abschnitten auf den Hauptachsen, gemessen vom
+Schwerpunkt, und nicht mit Koordinaten im gezeichneten KOS.
+
+%---------------------------------------------------------------------
+\section{Spannungskreis: vom Schnitt zum Zustand}\label{sec:mathe-kreis}
+
+\textbf{Lineare Gleichungen.} Mit $\sigma_m$, $R_c$ und $R_s$ als Unbekannten ist jede Angabe mit
+bekanntem Winkel eine Zeile
+\[
+  \sigma = \sigma_m + R_c\cos 2\alpha + R_s\sin 2\alpha, \qquad
+  \tau = -R_c\sin 2\alpha + R_s\cos 2\alpha .
+\]
+\textbf{Punkte ohne Winkel} erfüllen $(\sigma - \sigma_m)^2 + \tau^2 = R_c^2 + R_s^2$. Zieht man
+diese Gleichung für zwei solche Punkte voneinander ab, fallen alle quadratischen Terme weg und es
+bleibt eine lineare Gleichung für $\sigma_m$ allein:
+$2(\sigma_2 - \sigma_1)\,\sigma_m = \sigma_2^2 + \tau_2^2 - \sigma_1^2 - \tau_1^2$. Nur die
+Gleichung des ersten Punktes bleibt quadratisch.
+
+\textbf{Rang.} Die linearen Zeilen löst das Programm mit Gauß-Jordan und Spaltenpivotsuche und
+zählt dabei, wie viele Pivotelemente es findet (Toleranz relativ zum größten Eintrag). Bleibt in
+einer Zeile ohne Pivot rechts etwas übrig, widersprechen sich die Angaben.
+
+\begin{itemize}
+  \item \textbf{Rang 3:} Der Zustand ist eindeutig. Ein Punkt ohne Winkel muss dann nur noch auf
+        dem Kreis liegen (Probe).
+  \item \textbf{Rang 2 und ein Punkt ohne Winkel:} Die Lösungen der linearen Zeilen bilden eine
+        Gerade $\vec x = \vec x_0 + t\,\vec d$ im $(\sigma_m, R_c, R_s)$-Raum. In die quadratische
+        Gleichung eingesetzt, wird daraus $a t^2 + b t + c = 0$ mit keiner, einer oder zwei Lösungen.
+        Genau daher kommt \emph{zwei Zustände möglich}.
+  \item \textbf{Weniger:} Es fehlen Angaben.
+\end{itemize}
+
+Schnitte ohne Winkel mit nur $\sigma$ oder nur $\tau$ geben keine Gleichung, aber eine
+Ungleichung: $|\sigma - \sigma_m| \le R$ bzw.\ $|\tau| \le R$. Damit sortiert das Programm von zwei
+möglichen Zuständen den aus, auf dessen Kreis der Wert nicht passt.
+
+\textbf{Die Spannungsscheibe} ist das Vieleck, dessen Kanten alle einen Kreis mit Radius $r$
+berühren: der Schnitt der Halbebenen $\vec n_i \cdot \vec x \le r$ mit den Schnittnormalen
+$\vec n_i$. Liegen zwei benachbarte Normalen $160^\circ$ oder mehr auseinander, wäre die Scheibe
+offen (oder eine sehr spitze Nadel). Dann ergänzt das Programm den $x$- oder $y$-Schnitt, dessen
+Normale am nächsten an der Mitte der größten Lücke liegt, und das so oft, bis die Lücke kleiner ist.

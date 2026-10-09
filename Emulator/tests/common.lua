@@ -13,7 +13,41 @@ io.stdout:setvbuf('no')
 M.dir = (debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*[/\\])") or ".\\")
 M.cas = dofile(M.dir .. '..\\cas_bridge.lua')
 M.cas.start()
-M.pfad = M.cas.loadBiegelinie(nil, '_G.neuCasText = neuCasText; _G.neuZahl = neuZahl')
+M.pfad = M.cas.loadBiegelinie(nil, [==[
+_G.neuCasText = neuCasText; _G.neuZahl = neuZahl
+_G.exportArbeitssatzToTI = exportArbeitssatzToTI
+_G.exportSchnittkraefteToTI = exportSchnittkraefteToTI; _G.exportStabToTI = exportStabToTI
+_G.exportBiegelinienToTI = exportBiegelinienToTI; _G.exportULinienToTI = exportULinienToTI
+-- PvV: eine Bindung am Knoten loesen wie im Menue "pvv_knoten" (Zeile 1 H, 2 V, 3 M, 4 Gelenk)
+_G.pvvFreigabe = function(nr, zeile)
+    local k = knoten[nr]
+    pvvBackupSystem()
+    if zeile == 1 then k.lager_x = false; pvv_released_binding = { type = "lager_x", node = nr }
+    elseif zeile == 2 then k.lager_y = false; pvv_released_binding = { type = "lager_y", node = nr }
+    elseif zeile == 3 then k.lager_m = false; pvv_released_binding = { type = "lager_m", node = nr }
+    else k.gelenk = true; pvv_released_binding = { type = "knoten_gelenk", node = nr } end
+    pvvModus = false; in_pvv_release = true
+    buildPolplan(); calcKinematicStates(); ansichtsModus = "V"; pvvPrepareCAS()
+end
+-- PvV: Gelenk am Stab einbauen wie im Menue "pvv_stab" (Zeile 1/2 M-Gelenk A/B, 3/4 N-, 5/6 Q-Gelenk)
+_G.pvvFreigabeStab = function(nr, zeile)
+    local s = staebe[nr]
+    local felder = { "gelenk_A", "gelenk_B", "n_gelenk_A", "n_gelenk_B", "q_gelenk_A", "q_gelenk_B" }
+    local typen = { "m_gelenk", "m_gelenk", "n_gelenk", "n_gelenk", "q_gelenk", "q_gelenk" }
+    pvvBackupSystem()
+    s[felder[zeile]] = true
+    pvv_released_binding = { type = typen[zeile], stab = nr, endA = (zeile % 2 == 1) }
+    pvvModus = false; in_pvv_release = true
+    buildPolplan(); calcKinematicStates(); ansichtsModus = "V"; pvvPrepareCAS()
+end
+_G.pvvEnde = function() pvvRestoreSystem(); in_pvv_release = false; pvv_released_binding = nil; ansichtsModus = "System" end
+_G.getKinematik = function() return kinematic_disk_states, kinematic_seed_info end
+_G.systemFingerabdruck = systemFingerabdruck
+-- Hover setzen wie mit dem Cursor (fuer on.backspaceKey)
+_G.setHover = function(typ, obj) hoverTyp, hoverObj = typ, obj end
+-- Mausposition in Pixeln (fuer Hover-Anzeigen wie den Tooltip oben rechts)
+_G.setMaus = function(x, y) mouseX, mouseY = x, y end
+]==])
 
 M.write = io.write
 M.verbose = os.getenv('TEST_VERBOSE') ~= nil

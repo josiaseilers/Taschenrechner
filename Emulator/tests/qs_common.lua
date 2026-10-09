@@ -123,6 +123,13 @@ _G.__Q = {
   sigmaScroll = function() return sigma_scroll_y end,
   tippe = function(text) for i = 1, #text do on.charIn(text:sub(i, i)) end; on.enterKey() end,
   sigmaTabelle = function(gc) drawSigmaResultsTable(gc, 318, 2000) end,
+  hoverZustand = function() return hover_type, hover_idx end,
+  schubmittelpunkt = function() shear_center_cache = nil; return berechneSchubmittelpunkt() end,
+  standardDicke = function(t) if t then default_t = t end; return default_t end,
+  -- Kernflaeche: Modus setzen (1 Geraden, 2 Kernflaeche), Hover, Laengen wie angezeigt
+  kern = function(modus) kernMode = modus; kern_build(); return kern_lines, kern_vertices end,
+  kernHover = function(linie, punkt) kern_hover_line, kern_hover_pt = linie, punkt end,
+  laenge = function(x) return display_length(x) end,
 }
 ]]
 assert(loadstring(code .. export, '=' .. pfad))()

@@ -1,0 +1,21 @@
+{
+    // LaTeX Workshop: Anleitung.tex mit MiKTeX bauen, ohne latexmk (das braucht unter MiKTeX Perl).
+    "latex-workshop.latex.tools": [
+        {
+            "name": "pdflatex",
+            "command": "pdflatex",
+            "args": ["-synctex=1", "-interaction=nonstopmode", "-file-line-error", "%DOC%"]
+        }
+    ],
+    // Zwei Laeufe: der erste schreibt Inhaltsverzeichnis und Verweise, der zweite setzt sie ein.
+    "latex-workshop.latex.recipes": [
+        { "name": "pdflatex (2x)", "tools": ["pdflatex", "pdflatex"] }
+    ],
+    // Neu bauen, sobald sich eine Datei aendert - auch wenn Claude sie aendert.
+    "latex-workshop.latex.autoBuild.run": "onFileChange",
+    // PDF als Tab neben dem Quelltext anzeigen (sperrt die Datei nicht).
+    "latex-workshop.view.pdf.viewer": "tab",
+    // Hilfsdateien ueber die Dateiliste loeschen statt mit "latexmk -c". Das passiert automatisch,
+    // wenn ein Bau fehlschlaegt (Aufraeumen und neu versuchen); latexmk fehlt unter MiKTeX.
+    "latex-workshop.latex.clean.method": "glob"
+}

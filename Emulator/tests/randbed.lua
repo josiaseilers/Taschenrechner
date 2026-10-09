@@ -116,4 +116,97 @@ fall('4 Klausursystem mit starrem Balken', function()
     pruefeGegenFEM(1e-6)
 end)
 
+-- Zweigelenkrahmen wie in der Klausur: alle Staebe dehnsteif, F in Riegelmitte
+local function portal(auf, symb, stielEA)
+    local d = { EI = 1, EA = 1, dehnsteif = true }
+    if symb then d.EI_str, d.EA_str = 'EI', 'EA' end
+    local function bar(a, b, f)
+        local s = T.bar(a, b, f, d)
+        return s
+    end
+    local K = { pinned(node(0, 0)), node(0, -1), node(1, -1), node(2, -1), pinned(node(2, 0)) }
+    K[3].last_y = 1
+    if symb then K[3].last_y_str = 'F' end
+    local st = stielEA and { dehnsteif = false, EA = stielEA } or nil
+    local S = { bar(1, 2, st), bar(2, 3), bar(3, 4), auf and bar(5, 4, st) or bar(4, 5, st) }
+    if not T.rechne(K, S, { starrDirekt = true }) then return nil end
+    if not T.randLGS() then return nil end
+    return bedingungen()
+end
+-- Bedingungen in den beiden Gruppen
+local function gruppen(rb)
+    local g, w, u = nil, {}, {}
+    for _, t in ipairs(rb) do
+        if t:find('Biegelinie w: diese genuegen', 1, true) then g = w
+        elseif t:find('zusaetzlich fuer Laengslinie u', 1, true) then g = u
+        elseif g then g[#g + 1] = t end
+    end
+    return w, u
+end
+
+fall('5 Rahmen mit dehnsteifen Staeben: u und N durchgereicht', function()
+    for _, auf in ipairs({ false, true }) do
+        T.abschnitt('Zweigelenkrahmen, alle Staebe dehnsteif, rechter Stiel ' .. (auf and 'nach oben' or 'nach unten'))
+        local rb = portal(auf)
+        if not rb then return end
+        zeige(rb)
+        local w, u = gruppen(rb)
+        T.zahl('16 Bedingungen fuer w (4 je Stab)', #w, 16, 0)
+        T.zahl('8 Bedingungen zusaetzlich fuer u und N', #u, 8, 0)
+        for _, t in ipairs(w) do
+            T.wahr('w-Gruppe ohne Laengsgroesse: ' .. t, not t:find('u%d') and not t:find('EAu', 1, true), t)
+        end
+        local sway = auf and 'w4(x4=1)=w1(x1=1)' or 'w4(x4=0)=-w1(x1=1)'
+        T.wahr('Seitenverschiebung durchgereicht: ' .. sway, enthaelt(w, sway), table.concat(w, ' | '))
+        T.wahr('Querkraefte der Stiele verbunden', enthaelt(w, "EIw1'''(x1=1)=-EIw4'''"), table.concat(w, ' | '))
+        T.wahr('u-Gruppe wie von Hand: u2(x2=0)=w1(x1=1)', enthaelt(u, 'u2(x2=0)=w1(x1=1)'), table.concat(u, ' | '))
+        T.wahr('randinfo nennt das Einsetzen',
+            tostring(T.evs('randinfo')):find('dehnsteifen Staebe eingesetzt', 1, true) ~= nil, tostring(T.evs('randinfo')))
+        -- die zusammengefasste Bedingung gilt fuer die Loesung
+        if auf then T.zahl('w4(1) = w1(1)', ev('wv4(1)'), ev('wv1(1)'), 1e-12)
+        else T.zahl('w4(0) = -w1(1)', ev('wv4(0)'), -ev('wv1(1)'), 1e-12) end
+        pruefeGegenFEM()
+    end
+end)
+
+fall('6 Rahmen symbolisch wie auf dem Rechner', function()
+    T.abschnitt('Zweigelenkrahmen symbolisch (F, EI), alle Staebe dehnsteif')
+    local rb = portal(false, true)
+    if not rb then return end
+    zeige(rb)
+    local w = gruppen(rb)
+    T.zahl('16 Bedingungen fuer w', #w, 16, 0)
+    T.wahr('w4(x4=0)=-w1(x1=l)', enthaelt(w, 'w4(x4=0)=-w1(x1=l)'), table.concat(w, ' | '))
+end)
+
+fall('7 Elastische Stiele bleiben gekoppelt', function()
+    T.abschnitt('Riegel dehnsteif, Stiele mit EA: Stielstauchung steckt in der Biegelinie des Riegels')
+    local rb = portal(false, false, 100)
+    if not rb then return end
+    T.wahr('keine Gruppenueberschrift', not enthaelt(rb, '---'), table.concat(rb, ' | '))
+    pruefeGegenFEM()
+end)
+
+fall('8 Rahmen mit Horizontalkraft am Riegel', function()
+    for _, symb in ipairs({ false, true }) do
+        T.abschnitt('Zweigelenkrahmen, dehnsteif, F in Riegelmitte und H an der linken Ecke' .. (symb and ' (symbolisch)' or ''))
+        local d = { EI = 1, EA = 1, dehnsteif = true }
+        if symb then d.EI_str, d.EA_str = 'EI', 'EA' end
+        local K = { pinned(node(0, 0)), node(0, -1), node(1, -1), node(2, -1), pinned(node(2, 0)) }
+        K[3].last_y, K[2].last_x = 1, 2
+        if symb then K[3].last_y_str, K[2].last_x_str = 'F', 'H' end
+        local S = { T.bar(1, 2, nil, d), T.bar(2, 3, nil, d), T.bar(3, 4, nil, d), T.bar(4, 5, nil, d) }
+        if not T.rechne(K, S, { starrDirekt = true }) then return end
+        if not T.randLGS() then return end
+        local rb = bedingungen()
+        zeige(rb)
+        local w = gruppen(rb)
+        T.zahl('16 Bedingungen fuer w', #w, 16, 0)
+        -- Summe der Stielquerkraefte = -H (Gleichgewicht am ganzen Riegel)
+        local soll = symb and "EIw1'''(x1=l)+EIw4'''(x4=0)+H=0" or "EIw1'''(x1=1)+EIw4'''(x4=0)+2=0"
+        T.wahr('H in der zusammengefassten Bedingung: ' .. soll, enthaelt(w, soll), table.concat(w, ' | '))
+        if not symb then pruefeGegenFEM() end
+    end
+end)
+
 T.ende('Randbedingungen lesbar')

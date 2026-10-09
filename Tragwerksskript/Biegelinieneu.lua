@@ -43,6 +43,51 @@ end
 hinweisListe = {}           -- Hinweise nach der Berechnung (gelbe Box, ESC schliesst sie)
 hinweisOffen = false
 hinweisSig, hinweisQuittiert = nil, nil   -- nach ESC erst wieder zeigen, wenn sich das System geaendert hat
+hinweisScroll, hinweisScrollMax = 0, 0    -- erste sichtbare Zeile der gelben Box (Pfeiltasten hoch/runter)
+hinweisScrollInhalt = nil                 -- Inhalt, zu dem hinweisScroll gehoert (neuer Inhalt beginnt oben)
+hinweisBoxScrollbar = false               -- gelbe Box ist sichtbar und laenger als der Bildschirm
+
+-- Gelbe Hinweis- bzw. Exportbox. Passt der Text nicht auf den Bildschirm, zeigt sie einen Ausschnitt,
+-- den die Pfeiltasten hoch/runter verschieben (on.arrowKey), dazu einen Zeilenzaehler und rechts
+-- Pfeile, solange oben bzw. unten noch etwas steht.
+function zeichneHinweisBox(gc, b, h, liste, titel)
+    local boxW = math.min(b - 20, 300)
+    gc:setFont("sansserif", "r", 9)
+    local zeilen = {}
+    for hi, text in ipairs(liste) do
+        if hi > 1 then zeilen[#zeilen + 1] = "" end
+        for absatz in (text .. "\n"):gmatch("(.-)\n") do   -- \n erzwingt eine neue Zeile
+            local zeile = ""
+            for wort in absatz:gmatch("%S+") do
+                local probe = (zeile == "") and wort or (zeile .. " " .. wort)
+                if zeile ~= "" and gc:getStringWidth(probe) > boxW - 24 then zeilen[#zeilen + 1] = zeile; zeile = wort else zeile = probe end
+            end
+            if zeile ~= "" then zeilen[#zeilen + 1] = zeile end
+        end
+    end
+    local boxH = math.min(28 + 13 * #zeilen, h - 10)
+    local sichtbar = math.max(1, math.floor((boxH - 28) / 13))
+    local inhalt = titel .. "\1" .. table.concat(liste, "\1")
+    if inhalt ~= hinweisScrollInhalt then hinweisScrollInhalt, hinweisScroll = inhalt, 0 end
+    hinweisScrollMax = math.max(0, #zeilen - sichtbar)
+    hinweisScroll = math.max(0, math.min(hinweisScroll or 0, hinweisScrollMax))
+    hinweisBoxScrollbar = hinweisScrollMax > 0
+    local boxX, boxY = math.floor((b - boxW) / 2), math.floor((h - boxH) / 2)
+    gc:setColorRGB(255, 235, 150); gc:fillRect(boxX, boxY, boxW, boxH); gc:setColorRGB(0, 0, 0); gc:drawRect(boxX, boxY, boxW, boxH)
+    gc:setFont("sansserif", "b", 10); gc:drawString(titel .. ":", boxX + 8, boxY + 6)
+    gc:setFont("sansserif", "r", 9)
+    for k = 1, math.min(sichtbar, #zeilen - hinweisScroll) do
+        gc:drawString(zeilen[hinweisScroll + k], boxX + 8, boxY + 12 + 13 * k)
+    end
+    gc:drawString("[Esc]", boxX + boxW - 34, boxY + 6)
+    if hinweisBoxScrollbar then
+        local zaehler = string.format("%d-%d/%d", hinweisScroll + 1, hinweisScroll + sichtbar, #zeilen)
+        gc:drawString(zaehler, boxX + boxW - 40 - gc:getStringWidth(zaehler), boxY + 6)
+        local ax = boxX + boxW - 10
+        if hinweisScroll > 0 then gc:fillPolygon({ ax - 4, boxY + 30, ax + 4, boxY + 30, ax, boxY + 24 }) end
+        if hinweisScroll < hinweisScrollMax then gc:fillPolygon({ ax - 4, boxY + boxH - 10, ax + 4, boxY + boxH - 10, ax, boxY + boxH - 4 }) end
+    end
+end
 loeschFrage = false         -- Sicherheitsfrage vor "alles loeschen" (Enter loescht, ESC bricht ab)
 defEI = 1e8        
 autoKGV = false    
@@ -54,6 +99,8 @@ zoomExplosion = 5
 casToleranz = 5
 verlaufSkalierung = 1
 systemBerechnet = false
+randErgebnis = nil   -- letztes Rand-LGS: Biege-/Laengslinien je Stab, Knotenverschiebungen, Schluessel
+letzteSystemNr = nil -- zuletzt gespeicherte bzw. geoeffnete Systemnummer (Obermenue Seite 4)
 
 ansichtsModus = "System"
 explosionPage = 1
@@ -71,6 +118,7 @@ fachwerkModus = false
 zeigeBemassung = true
 bogenSegmente = 20
 zahlenFormat = 1
+rasterPunkte = 1            -- Rasterpunkte: 0 keine, 1 normal (1 px), 2 dick (2 px); Obermenue Seite 3
 
 local warnungKinematisch = false 
 local warnungStarrBestimmt = false
@@ -502,6 +550,327 @@ local function eval_cas_string(expr, simplifyHugeFractions)
     return res
 end
 
+-- Ist Stab s ein Bogen? Nur dann wird er in Teilstaebe zerlegt (Radius mindestens halbe Sehne);
+-- ein zu kleiner Radius wird ignoriert und der Stab gerade gerechnet.
+function istBogen(s)
+    local dx, dy = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
+    local L = math.sqrt(dx^2 + dy^2)
+    return (s.bogen_r or 0) ~= 0 and math.abs(s.bogen_r) >= L/2 and L > 0
+end
+
+-- Punkt (x, y) und Tangente (tx, ty) Richtung Stabende auf dem Bogen beim Winkel phi (rad) ab Stabanfang
+function bogenPunkt(g, phi)
+    local b = phi - g.alpha / 2
+    local xl, yl = g.R * math.sin(b), g.sgn * (g.R * math.cos(b) - g.d)
+    local tl, tq = math.cos(b), -g.sgn * math.sin(b)
+    return g.mx + xl * g.ex - yl * g.ey, g.my + xl * g.ey + yl * g.ex, tl * g.ex - tq * g.ey, tl * g.ey + tq * g.ex
+end
+
+-- Geometrie eines Bogens (nil, wenn kein Bogen): Radius R, Sehne L, Oeffnungswinkel alpha (rad),
+-- Drehsinn kappa der Tangente (= -sgn; +1 heisst mathematisch positiv im Weltsystem mit y nach unten),
+-- Tangente am Anfang (cA, sA) und die Teilungspunkte pts[0..n] = { x, y, phi } mit phi = Winkel ab
+-- Stabanfang (rad). Punkt 1 und n-1 liegen tangential im Abstand L_Bogen/n von den Stabenden (erstes und
+-- letztes Teilstueck tangential), die uebrigen auf dem Bogen bei gleichmaessig geteilter Sehne.
+function bogenGeometrie(s, n)
+    if not istBogen(s) then return nil end
+    local k1, k2 = knoten[s.k1], knoten[s.k2]
+    local dx, dy = k2.x - k1.x, k2.y - k1.y
+    local L = math.sqrt(dx^2 + dy^2)
+    local R = math.abs(s.bogen_r)
+    local sgn = s.bogen_r > 0 and -1 or 1
+    local g = { R = R, L = L, sgn = sgn, kappa = -sgn, n = n or bogenSegmente,
+        alpha = 2 * math.asin(math.min(1, L / (2 * R))), d = math.sqrt(math.max(0, R^2 - (L / 2)^2)),
+        mx = (k1.x + k2.x) / 2, my = (k1.y + k2.y) / 2, ex = dx / L, ey = dy / L }
+    g.cA, g.sA = select(3, bogenPunkt(g, 0))
+    local cB, sB = select(3, bogenPunkt(g, g.alpha))
+    local seg = R * g.alpha / g.n
+    g.pts = { [0] = { x = k1.x, y = k1.y, phi = 0 }, [g.n] = { x = k2.x, y = k2.y, phi = g.alpha } }
+    for j = 1, g.n - 1 do
+        if j == 1 then
+            g.pts[j] = { x = k1.x + seg * g.cA, y = k1.y + seg * g.sA, phi = g.alpha / g.n }
+        elseif j == g.n - 1 then
+            g.pts[j] = { x = k2.x - seg * cB, y = k2.y - seg * sB, phi = g.alpha - g.alpha / g.n }
+        else
+            local xl = (j / g.n - 0.5) * L
+            local yl = sgn * (math.sqrt(R^2 - xl^2) - g.d)
+            g.pts[j] = { x = k1.x + j / g.n * dx - yl * g.ey, y = k1.y + j / g.n * dy + yl * g.ex,
+                phi = g.alpha / 2 + math.asin(xl / R) }
+        end
+    end
+    return g
+end
+
+-- Winkeleinheiten des Rechners je rad (RAD 1, DEG 180/pi, GRAD 200/pi), als Zahl und als CAS-Text.
+-- In dieser Einheit zaehlen x in Lastfunktionen auf Boegen und p in M_bogen_i(p).
+function bogenWinkelFaktor()
+    local function minusEins(w)
+        local ok, v = pcall(math.eval, "approx(cos(" .. w .. "))")
+        v = ok and casToNumber(v)
+        return v and math.abs(v + 1) < 1e-9
+    end
+    if math.eval then
+        if minusEins("180") then return 180 / math.pi, "(180/pi)" end
+        if minusEins("200") then return 200 / math.pi, "(200/pi)" end
+    end
+    return 1, "1"
+end
+
+-- Lastwerte eines Bogens an den Teilungspunkten j = 0..n: q quer und n laengs je Bogenlaenge, jeweils mit
+-- dem Trapezanteil q_A..q_B bzw. n_A..n_B linear ueber die Bogenlaenge; gx/gy global (bei Projektion je
+-- Grundriss- bzw. Hoehenlaenge), m. Eine Lastfunktion mit x wird beim Winkel ab Stabanfang im
+-- Winkelmodus des Rechners ausgewertet (x = phi * Faktor, wie p in M_bogen_i(p)).
+-- w.fehler[feld] = true: das CAS konnte den Lasttext nicht auswerten (Wert 0 gesetzt).
+function bogenLastWerte(s, g)
+    local w, u = { fehler = {} }, nil
+    local function reihe(feld)
+        local r, str = {}, s[feld .. "_str"]
+        if type(str) == "string" and str:hasx() then
+            u = u or bogenWinkelFaktor()
+            local e = casWithDummySymbols(neuCasText(str))
+            for j = 0, g.n do
+                local v
+                if math.eval then
+                    local ok, res = pcall(math.eval, "approx(" .. e:subx("(" .. string.format("%.15g", g.pts[j].phi * u) .. ")") .. ")")
+                    v = ok and casToNumber(res) or nil
+                end
+                if not v then w.fehler[feld] = true; v = 0 end
+                r[j] = v
+            end
+        else
+            for j = 0, g.n do r[j] = s[feld] or 0 end
+        end
+        return r
+    end
+    for _, feld in ipairs({ "q", "n", "m", "gx", "gy" }) do w[feld] = reihe(feld) end
+    for j = 0, g.n do
+        local f = g.pts[j].phi / g.alpha
+        w.q[j] = w.q[j] + (s.q_A or 0) + ((s.q_B or 0) - (s.q_A or 0)) * f
+        w.n[j] = w.n[j] + (s.n_A or 0) + ((s.n_B or 0) - (s.n_A or 0)) * f
+    end
+    return w
+end
+
+-- Lasten der Teilstaebe k = 1..n eines Bogens (Teilstab k von Punkt k-1 nach k). Je Lastart ein lokaler
+-- Trapezanteil arten[art] = { qa, qb, na, nb } (quer bzw. laengs zum Teilstab, Anfang/Ende), dazu das
+-- Streckenmoment m und die Summen qa, qb, na, nb:
+--   q quer zum Teilstab (radial) und n laengs (tangential) mit den Werten der Endpunkte,
+--   gx/gy global, projiziert je Grundriss- bzw. Hoehenlaenge des Teilstabs,
+--   m als Mittel der Endwerte.
+-- Lasten je Bogenlaenge (gx/gy ohne Projektion, m) werden mit Bogenstueck/Teilstablaenge skaliert, damit
+-- jeder Teilstab die Last seines Bogenstuecks traegt. q und n brauchen das nicht: eine konstante radiale
+-- bzw. tangentiale Last hat auf Bogenstueck und Sehne dieselbe Resultierende.
+function bogenTeilLasten(s, g, w)
+    local teile = {}
+    for k = 1, g.n do
+        local P, Q = g.pts[k - 1], g.pts[k]
+        local l = math.sqrt((Q.x - P.x)^2 + (Q.y - P.y)^2)
+        local c, sv = (Q.x - P.x) / l, -(Q.y - P.y) / l   -- c_val, s_val wie in getEqQ
+        local skal = g.R * (Q.phi - P.phi) / l
+        local fx = s.gx_proj and math.abs(sv) or skal
+        local fy = s.gy_proj and math.abs(c) or skal
+        local gxa, gxb = w.gx[k - 1] * fx, w.gx[k] * fx
+        local gya, gyb = w.gy[k - 1] * fy, w.gy[k] * fy
+        local t = { l = l, c = c, s = sv, m = (w.m[k - 1] + w.m[k]) / 2 * skal, arten = {
+            q = { w.q[k - 1], w.q[k], 0, 0 },
+            n = { 0, 0, w.n[k - 1], w.n[k] },
+            gx = { gxa * sv, gxb * sv, gxa * c, gxb * c },
+            gy = { gya * c, gyb * c, -gya * sv, -gyb * sv } } }
+        local sum = { 0, 0, 0, 0 }
+        for _, art in ipairs({ "q", "n", "gx", "gy" }) do
+            for i = 1, 4 do sum[i] = sum[i] + t.arten[art][i] end
+        end
+        t.qa, t.qb, t.na, t.nb = sum[1], sum[2], sum[3], sum[4]
+        teile[k] = t
+    end
+    return teile
+end
+
+-- Hat der Bogen eine Last zwischen den Enden (Strecken-, Trapez-, globale Linien- oder Momentenlast)?
+-- Temperatur zaehlt nicht: sie erzeugt keine Kraefte zwischen den Enden.
+function bogenHatLast(s)
+    for _, f in ipairs({ "q", "q_A", "q_B", "n", "n_A", "n_B", "m", "gx", "gy" }) do
+        if math.abs(s[f] or 0) > 1e-12 then return true end
+    end
+    for _, f in ipairs({ "q_str", "n_str", "m_str", "gx_str", "gy_str" }) do
+        if type(s[f]) == "string" and s[f]:hasx() then return true end
+    end
+    return false
+end
+
+-- Stuetzwerte der Lastfunktionen eines Bogens fuer die Lastzeichnung, je 11 Werte bei den Winkeln
+-- j/10*alpha (x = Winkel ab Stabanfang im Winkelmodus des Rechners). Wie bei geraden Staeben: q_pts = ganze
+-- Querlast (mit Trapez), n_pts, m_pts, gx_pts, gy_pts nur der Anteil der Lastfunktion; nil ohne Funktion.
+-- Die Integral-Stuetzwerte gerader Staebe (Q_cas_pts ...) entfallen, die Bogendiagramme kommen aus der FEM.
+function bogenLastPunkte(s, g)
+    s.q_pts, s.n_pts, s.m_pts, s.gx_pts, s.gy_pts = nil, nil, nil, nil, nil
+    s.Q_cas_pts, s.M_cas_pts, s.v_cas_pts_EI, s.N_cas_pts, s.u_cas_pts_EA = nil, nil, nil, nil, nil
+    s.q_in_cas, s.n_in_cas = false, false
+    local h = { n = 10, alpha = g.alpha, pts = {} }
+    for j = 0, 10 do h.pts[j] = { phi = g.alpha * j / 10 } end
+    local w = bogenLastWerte(s, h)
+    local function liste(feld, abzug)
+        if not (type(s[feld .. "_str"]) == "string" and s[feld .. "_str"]:hasx()) then return nil end
+        local r = {}
+        for j = 0, 10 do r[j + 1] = w[feld][j] - (abzug and abzug(j / 10) or 0) end
+        return r
+    end
+    s.q_pts = liste("q")
+    s.n_pts = liste("n", function(f) return (s.n_A or 0) + ((s.n_B or 0) - (s.n_A or 0)) * f end)
+    s.m_pts, s.gx_pts, s.gy_pts = liste("m"), liste("gx"), liste("gy")
+end
+
+-- Resultierende der Lasten auf einem Bogen je Lastart (q, n, gx, gy, m) und gesamt (summe), aus den
+-- Teilstablasten wie in der FEM: { Fx, Fy, M } global (y nach unten), M um den Stabanfang gegen den
+-- Uhrzeigersinn. nil, wenn s kein Bogen ist.
+function bogenLastResultierende(s)
+    local g = bogenGeometrie(s)
+    if not g then return nil end
+    local teile = bogenTeilLasten(s, g, bogenLastWerte(s, g))
+    local k1 = knoten[s.k1]
+    local res = {}
+    for _, art in ipairs({ "q", "n", "gx", "gy", "m", "summe" }) do res[art] = { 0, 0, 0 } end
+    local function dazu(art, Fx, Fy, M)
+        for _, r in ipairs({ res[art], res.summe }) do r[1] = r[1] + Fx; r[2] = r[2] + Fy; r[3] = r[3] + M end
+    end
+    for k, t in ipairs(teile) do
+        local P = g.pts[k - 1]
+        local tx, ty = t.c, -t.s
+        local dx, dy = P.x - k1.x, P.y - k1.y
+        for _, art in ipairs({ "q", "n", "gx", "gy" }) do
+            local a = t.arten[art]
+            local Fq, Fn = t.l * (a[1] + a[2]) / 2, t.l * (a[3] + a[4]) / 2
+            local Fx, Fy = -Fq * ty + Fn * tx, Fq * tx + Fn * ty
+            -- Moment um k1 (gegen den Uhrzeigersinn) plus Hebel der Querlast entlang des Teilstabs
+            dazu(art, Fx, Fy, (dy * Fx - dx * Fy) - t.l^2 * (a[1] + 2 * a[2]) / 6)
+        end
+        dazu("m", 0, 0, t.m * t.l)
+    end
+    return res
+end
+
+-- Ist das System berechnet? Boegen haben danach keine eigene Steifigkeitsmatrix (die steckt in ihren
+-- Teilstaeben), deshalb zaehlt jeder Stab mit Ergebnis und nicht nur Stab 1.
+function exportBereit()
+    for _, s in ipairs(staebe) do
+        if s.mat_k or s.arc_plot_data then return true end
+    end
+    return false
+end
+
+-- Lastanteile der Bogen-Schnittgroessen beim Schnitt p (CAS-Texte dN, dQ, dM; nil ohne Last). Die Last auf
+-- dem Bogenstueck 0..p wird ueber t integriert, p und t im Winkelmodus des Rechners (u Einheiten je rad,
+-- Bogenlaenge ds = R/u dt). Mit kappa = -sgn (Drehsinn der Tangente) und th(t) = Tangentenwinkel:
+--   dN = -R/u int( kappa*q*sin(p-t) + n*cos(p-t) + Gx*cos th(p) + Gy*sin th(p) )
+--   dQ = -R/u int( q*cos(p-t) - kappa*n*sin(p-t) - Gx*sin th(p) + Gy*cos th(p) )
+--   dM = -R/u int( R*q*sin(p-t) - kappa*R*n*(1-cos(p-t))
+--                  - kappa*R*((sin th(t)-sin th(p))*Gy + (cos th(t)-cos th(p))*Gx) + m )
+-- q quer, n laengs (je Bogenlaenge, Trapez linear in t, Lastfunktion mit x = t), Gx/Gy global je
+-- Bogenlaenge (projiziert mal |sin th| bzw. |cos th|), m Streckenmoment (gegen den Uhrzeigersinn).
+-- Das ist das Gleichgewicht am exakten Kreisbogen; die Werte am Bogenanfang stammen aus der FEM.
+function bogenExportLast(s)
+    if not bogenHatLast(s) then return nil end
+    local g = bogenGeometrie(s)
+    if not g then return nil end
+    local fN = fN_export
+    local u, u_str = bogenWinkelFaktor()
+    local kap, R = g.kappa, g.R
+    local function zahl(v) return string.format("%.15g", v) end
+    -- Lasttext je Bogenlaenge: Lastfunktion mit x = t oder Zahl, dazu das Trapez A..B linear in t
+    local function lastText(feld, A, B)
+        local teile, str = {}, s[feld .. "_str"]
+        if type(str) == "string" and str:hasx() then
+            teile[#teile + 1] = "(" .. casWithDummySymbols(neuCasText(str)):subx("(t)") .. ")"
+        elseif math.abs(s[feld] or 0) > 1e-12 then
+            teile[#teile + 1] = fN(s[feld])
+        end
+        if A and (math.abs(A) > 1e-12 or math.abs(B) > 1e-12) then
+            teile[#teile + 1] = "(" .. fN(A) .. "+(" .. fN(B - A) .. ")*t/(" .. zahl(g.alpha * u) .. "))"
+        end
+        return #teile > 0 and ("(" .. table.concat(teile, "+") .. ")") or nil
+    end
+    local q = lastText("q", s.q_A or 0, s.q_B or 0)
+    local n = lastText("n", s.n_A or 0, s.n_B or 0)
+    local gx, gy, m = lastText("gx"), lastText("gy"), lastText("m")
+    -- Tangentenwinkel th(v) = thA + kappa*v: cos/sin ueber die Tangente am Anfang (cA, sA), damit nur
+    -- Winkelfunktionen von p bzw. t vorkommen (richtig in jedem Winkelmodus)
+    local function cosTh(v) return "(" .. fN(g.cA) .. "*cos(" .. v .. ")-(" .. fN(kap * g.sA) .. ")*sin(" .. v .. "))" end
+    local function sinTh(v) return "(" .. fN(g.sA) .. "*cos(" .. v .. ")+(" .. fN(kap * g.cA) .. ")*sin(" .. v .. "))" end
+    -- Projektion je Bogenlaenge: |sin th| (gx) bzw. |cos th| (gy); abs nur, wenn das Vorzeichen wechselt
+    local thA = math.atan2(g.sA, g.cA)
+    local function projektion(f, text)
+        local pos, neg = false, false
+        for j = 0, 64 do
+            local v = f(thA + kap * g.alpha * j / 64)
+            if v > 1e-9 then pos = true elseif v < -1e-9 then neg = true end
+        end
+        if pos and neg then return "abs(" .. text .. ")" end
+        return neg and ("(-" .. text .. ")") or text
+    end
+    if gx and s.gx_proj then gx = "(" .. gx .. "*" .. projektion(math.sin, sinTh("t")) .. ")" end
+    if gy and s.gy_proj then gy = "(" .. gy .. "*" .. projektion(math.cos, cosTh("t")) .. ")" end
+    local kR = fN(kap * R)
+    local IN, IQ, IM = {}, {}, {}
+    if q then
+        IN[#IN + 1] = "(" .. fN(kap) .. ")*" .. q .. "*sin(p-t)"
+        IQ[#IQ + 1] = q .. "*cos(p-t)"
+        IM[#IM + 1] = "(" .. fN(R) .. ")*" .. q .. "*sin(p-t)"
+    end
+    if n then
+        IN[#IN + 1] = n .. "*cos(p-t)"
+        IQ[#IQ + 1] = "-(" .. fN(kap) .. ")*" .. n .. "*sin(p-t)"
+        IM[#IM + 1] = "-(" .. kR .. ")*" .. n .. "*(1-cos(p-t))"
+    end
+    if gx then
+        IN[#IN + 1] = gx .. "*" .. cosTh("p")
+        IQ[#IQ + 1] = "-" .. gx .. "*" .. sinTh("p")
+        IM[#IM + 1] = "-(" .. kR .. ")*(" .. cosTh("t") .. "-" .. cosTh("p") .. ")*" .. gx
+    end
+    if gy then
+        IN[#IN + 1] = gy .. "*" .. sinTh("p")
+        IQ[#IQ + 1] = gy .. "*" .. cosTh("p")
+        IM[#IM + 1] = "-(" .. kR .. ")*(" .. sinTh("t") .. "-" .. sinTh("p") .. ")*" .. gy
+    end
+    if m then IM[#IM + 1] = m end
+    local function integral(liste)
+        if #liste == 0 then return nil end
+        return "-(" .. fN(R) .. ")/" .. u_str .. "*integral(" .. table.concat(liste, "+") .. ",t,0,p)"
+    end
+    return integral(IN), integral(IQ), integral(IM)
+end
+
+-- Schnittgroessen eines Bogens ueber den Winkel p ab Stabanfang (im Winkelmodus des Rechners):
+-- M_bogen_i(p), N_bogen_i(p), q_bogen_i(p) aus den Kraeften am Bogenanfang (das erste Teilstueck liegt
+-- tangential, die Werte sind also die am Bogen) plus dem Anteil der Last auf dem Bogenstueck 0..p
+-- (bogenExportLast). Rueckgabe: Oeffnungswinkel in Grad, nil wenn kein Bogen oder nicht berechnet.
+function exportBogenSchnittkraefteToTI(i)
+    local s = staebe[i]
+    if not istBogen(s) or not s.arc_plot_data then return nil end
+    local dx, dy = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
+    local L = math.sqrt(dx^2 + dy^2)
+    local fN = fN_export
+    local R = math.abs(s.bogen_r)
+    local sgn = s.bogen_r > 0 and -1 or 1
+    local NA = s.arc_N_A or 0
+    local VA = s.arc_V_A or 0
+    local MA = s.arc_M_A or 0
+
+    local expr_M = fN(MA) .. " + " .. fN(VA*R) .. "*sin(p) + " .. fN(sgn*NA*R) .. "*(1-cos(p))"
+    local expr_N = fN(NA) .. "*cos(p) - " .. fN(sgn*VA) .. "*sin(p)"
+    local expr_V = fN(sgn*NA) .. "*sin(p) + " .. fN(VA) .. "*cos(p)"
+    local lastN, lastV, lastM = bogenExportLast(s)
+    if lastN then expr_N = expr_N .. " + (" .. lastN .. ")" end
+    if lastV then expr_V = expr_V .. " + (" .. lastV .. ")" end
+    if lastM then expr_M = expr_M .. " + (" .. lastM .. ")" end
+
+    if math.eval then
+        math.eval("M_bogen" .. i .. "(p) := " .. eval_cas_string(expr_M, true))
+        math.eval("N_bogen" .. i .. "(p) := " .. eval_cas_string(expr_N, true))
+        math.eval("q_bogen" .. i .. "(p) := " .. eval_cas_string(expr_V, true))
+        print("-> Bogen " .. i .. " (M, N, Q in Abh. v. Winkel p) exportiert!")
+    end
+    return math.deg(2 * math.asin(math.min(1, L / (2 * R))))
+end
+
 local function exportStabToTI(i)
     local s = staebe[i]
     if s.mat_k then
@@ -509,27 +878,9 @@ local function exportStabToTI(i)
         speichereMatrix("stab" .. i .. "_p", s.mat_p)
         speichereMatrix("stab" .. i .. "_v", s.mat_v)
     end
-        
-    local dx, dy = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
-    local L = math.sqrt(dx^2 + dy^2)
-    if (s.bogen_r or 0) ~= 0 and math.abs(s.bogen_r) >= L/2 and L > 0 then
-        local fN = fN_export
-        local R = math.abs(s.bogen_r)
-        local sgn = s.bogen_r > 0 and -1 or 1
-        local NA = s.arc_N_A or 0
-        local VA = s.arc_V_A or 0
-        local MA = s.arc_M_A or 0
-        
-        local expr_M = fN(MA) .. " + " .. fN(VA*R) .. "*sin(p) + " .. fN(sgn*NA*R) .. "*(1-cos(p))"
-        local expr_N = fN(NA) .. "*cos(p) - " .. fN(sgn*VA) .. "*sin(p)"
-        local expr_V = fN(sgn*NA) .. "*sin(p) + " .. fN(VA) .. "*cos(p)"
-        
-        if math.eval then
-            math.eval("M_bogen" .. i .. "(p) := " .. eval_cas_string(expr_M, true))
-            math.eval("N_bogen" .. i .. "(p) := " .. eval_cas_string(expr_N, true))
-            math.eval("q_bogen" .. i .. "(p) := " .. eval_cas_string(expr_V, true))
-            print("-> Bogen " .. i .. " (M, N, Q in Abh. v. Winkel p) exportiert!")
-        end
+
+    if istBogen(s) then
+        exportBogenSchnittkraefteToTI(i)
     elseif s.mat_k then
         exportSchnittkraefteToTI(i)
         exportBiegelinienToTI(i)
@@ -544,7 +895,7 @@ local function exportKnotenToTI(i)
 end
 
 local function exportAllToTI()
-    if #staebe == 0 or not staebe[1].mat_k then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
+    if not exportBereit() then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
     for i = 1, #staebe do exportStabToTI(i) end
     for i = 1, #knoten do exportKnotenToTI(i) end
     if glob_K and glob_F and glob_u then
@@ -555,13 +906,29 @@ local function exportAllToTI()
     zeigeMeldung("Matrizen und Systemdaten exportiert.", "Export")
 end
 
+-- Globale Linienlast p_X ("gx") bzw. p_Y ("gy") als Text in der Stabkoordinate x (0..L) und der
+-- Projektionsfaktor f (Kraft je Stablaenge = Last * f). Projiziert (Last je Hoehen- bzw.
+-- Grundrisslaenge) zaehlt die Laufvariable der Eingabe entlang der globalen Achse ab dem
+-- Stabanfang: p_X senkrecht (0..|dy|), p_Y waagerecht (0..|dx|), also x_global = x * f.
+-- Nicht projiziert laeuft sie entlang der Stabachse (0..L).
+function globaleLinienlast(s, typ)
+    local str = s[typ .. "_str"] or "0"
+    local k1, k2 = knoten[s.k1], knoten[s.k2]
+    local L = math.sqrt((k2.x - k1.x)^2 + (k2.y - k1.y)^2)
+    if not s[typ .. "_proj"] or L <= 0 then return str, 1 end
+    local f = (typ == "gx") and math.abs(k2.y - k1.y) / L or math.abs(k2.x - k1.x) / L
+    if str:hasx() then str = str:subx("(x*" .. string.format("%.15g", f) .. ")") end
+    return str, f
+end
+
 local function getEqQ(s, L, fN, L_str)
     local c_val = (knoten[s.k2].x - knoten[s.k1].x) / L
     local s_val = -(knoten[s.k2].y - knoten[s.k1].y) / L
     local f_gx = s.gx_proj and math.abs(s_val) or 1
     local f_gy = s.gy_proj and math.abs(c_val) or 1
     local T = neuCasText
-    local base = "("..T(s.q_str or "0")..") + ("..T(s.gx_str or "0")..")*"..fN(f_gx * s_val).." + ("..T(s.gy_str or "0")..")*"..fN(f_gy * c_val)
+    local gx_str, gy_str = globaleLinienlast(s, "gx"), globaleLinienlast(s, "gy")
+    local base = "("..T(s.q_str or "0")..") + ("..T(gx_str)..")*"..fN(f_gx * s_val).." + ("..T(gy_str)..")*"..fN(f_gy * c_val)
     if L_str and (s.q_A_str or s.q_B_str) then
         base = base .. " + ("..T(s.q_A_str or "0")..") + (("..T(s.q_B_str or "0")..")-("..T(s.q_A_str or "0").."))*x/("..L_str..")"
     end
@@ -573,7 +940,8 @@ local function getEqN(s, L, fN, L_str)
     local s_val = -(knoten[s.k2].y - knoten[s.k1].y) / L
     local f_gx = s.gx_proj and math.abs(s_val) or 1
     local f_gy = s.gy_proj and math.abs(c_val) or 1
-    local base = "("..neuCasText(s.n_str or "0")..") + ("..neuCasText(s.gx_str or "0")..")*"..fN(f_gx * c_val).." - ("..neuCasText(s.gy_str or "0")..")*"..fN(f_gy * s_val)
+    local gx_str, gy_str = globaleLinienlast(s, "gx"), globaleLinienlast(s, "gy")
+    local base = "("..neuCasText(s.n_str or "0")..") + ("..neuCasText(gx_str)..")*"..fN(f_gx * c_val).." - ("..neuCasText(gy_str)..")*"..fN(f_gy * s_val)
     if L_str and (s.n_A_str or s.n_B_str) then
         base = base .. " + ("..neuCasText(s.n_A_str or "0")..") + (("..neuCasText(s.n_B_str or "0")..")-("..neuCasText(s.n_A_str or "0").."))*x/("..L_str..")"
     end
@@ -581,16 +949,23 @@ local function getEqN(s, L, fN, L_str)
 end
 
 exportSchnittkraefteToTI = function(stab_index)
-    if #staebe == 0 or not staebe[1].mat_k then return end
+    if not exportBereit() then
+        if not stab_index then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen") end
+        return
+    end
     if math.eval then
         local fN = fN_export
-        
+        local boegen = {}
+
         local start_i = stab_index or 1
         local end_i = stab_index or #staebe
         for i = start_i, end_i do
             local s = staebe[i]
             local dx, dy = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y; local L = math.sqrt(dx^2 + dy^2)
-            if L > 0 and (s.bogen_r or 0) == 0 then
+            local winkel = istBogen(s) and exportBogenSchnittkraefteToTI(i)
+            if winkel then
+                boegen[#boegen + 1] = string.format("Stab %d: p von 0 bis %g Grad", i, math.floor(winkel * 100 + 0.5) / 100)
+            elseif L > 0 and not istBogen(s) then
                 local N0 = symbolischer_modus and ("-(" .. (s.symb_start.N or "0") .. ")") or fN(-s.s_local[1])
                 local Q0 = symbolischer_modus and ("-(" .. (s.symb_start.V or "0") .. ")") or fN(-s.s_local[2])
                 local M0 = symbolischer_modus and ("-(" .. (s.symb_start.M or "0") .. ")") or fN(-s.s_local[3])
@@ -645,7 +1020,10 @@ exportSchnittkraefteToTI = function(stab_index)
             end
         end
         -- nur melden, wenn der Export aus dem Menue kommt (intern je Stab: precalcSymbolicLabels)
-        if not stab_index then zeigeMeldung("Analytische Schnittkraftverlaeufe (N, Q, M) exportiert.", "Export")
+        if not stab_index and #boegen > 0 then
+            zeigeMeldung("Schnittkraftverlaeufe exportiert: N_stab_i(x), Q_stab_i(x), M_stab_i(x); Boegen: N_bogen_i(p), q_bogen_i(p), M_bogen_i(p) ueber den Winkel p ab Stabanfang (Winkelmodus des Rechners). "
+                .. table.concat(boegen, ", ") .. ".", "Export")
+        elseif not stab_index then zeigeMeldung("Analytische Schnittkraftverlaeufe (N, Q, M) exportiert.", "Export")
         else print("-> Analytische Schnittkraftverlaeufe (N, Q, M) exportiert!") end
     end
 end
@@ -831,7 +1209,7 @@ local function precalcSymbolicLabels()
 end
 
 exportBiegelinienToTI = function(stab_index)
-    if #staebe == 0 or not staebe[1].mat_k then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
+    if not exportBereit() then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
     if math.eval then
         local fN = fN_export
         
@@ -840,7 +1218,7 @@ exportBiegelinienToTI = function(stab_index)
         for i = start_i, end_i do
             local s = staebe[i]
             local dx, dy = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y; local L = math.sqrt(dx^2 + dy^2)
-            if L > 0 then
+            if L > 0 and not istBogen(s) then
                 local EI = stabEI(s)
                 local qA, qB = s.q_A, s.q_B 
                 local va = (math.abs(s.v_local[2] or 0) < 1e-12) and 0 or s.v_local[2]
@@ -912,7 +1290,7 @@ end
 
 
 exportULinienToTI = function(stab_index)
-    if #staebe == 0 or not staebe[1].mat_k then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
+    if not exportBereit() then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
     if math.eval then
         local fN = fN_export
 
@@ -923,7 +1301,7 @@ exportULinienToTI = function(stab_index)
             local dx = knoten[s.k2].x - knoten[s.k1].x
             local dy = knoten[s.k2].y - knoten[s.k1].y
             local L  = math.sqrt(dx^2 + dy^2)
-            if L > 0 and (s.bogen_r or 0) == 0 then
+            if L > 0 and not istBogen(s) then
                 local EA = stabEA(s)
 
                 -- Lokale Verschiebungen an den Stabenden (aus FEM-Loesung)
@@ -1288,6 +1666,170 @@ local function rlBedZeile(cond)
     return row
 end
 
+-- Durchreichen wie von Hand: Laengsverschiebung und Normalkraft eines dehnsteifen Stabes (direkte
+-- Methode) sind an beiden Enden dieselbe Unbekannte (C2 bzw. C1), ebenso die Knotenverschiebungen
+-- ux(K), uy(K). Eine Bedingung, in der nur eine solche Unbekannte steht, legt sie fest; eingesetzt in
+-- die anderen Bedingungen entstehen Beziehungen zwischen den Nachbarstaeben, z. B. aus
+-- "u2(x2=0)=w1(x1=l)", "u3(x3=0)=u2(x2=l)" und "w4(x4=0)=-u3(x3=l)" die Bedingung "w4(x4=0)=-w1(x1=l)".
+-- Bleiben danach nur Bedingungen mit Biegelinien-Unbekannten (c1..c4 aller Staebe) uebrig, genuegen
+-- sie fuer w (Gauss-Schritte mit den festgelegten Unbekannten als Pivot, das LGS bleibt regulaer).
+-- Rueckgabe { w = { {i = Nummer, text = neuer Text oder nil}, ... }, u = { Nummern } } oder nil.
+function neuDurchreichen(conds, typVon, nW)
+    local function zahl(t)
+        if type(t) == "number" then return t end
+        t = tostring(t or ""):gsub("%s", "")
+        local n = tonumber(t)
+        if n then return n end
+        local innen = t:match("^%((.*)%)$")
+        if innen then return zahl(innen) end
+        innen = t:match("^%-%((.*)%)$")
+        if innen then local v = zahl(innen); return v and -v end
+        return nil
+    end
+    local function istU(j) return typVon(j) ~= "w" end
+    -- durchreichbar: jede Groesse mit dieser Unbekannten haengt nur von ihr ab (Zahlenkoeffizient)
+    -- und steht mit einem Zahlenfaktor in der Bedingung (keine symbolische Feder davor)
+    local gut = {}
+    for _, cond in ipairs(conds) do
+        for _, t in ipairs(cond.terms) do
+            local n = 0
+            for _ in pairs(t.q.lin.c) do n = n + 1 end
+            for j, cj in pairs(t.q.lin.c) do
+                if istU(j) then
+                    local ok = n == 1 and type(t.f) == "number" and zahl(cj) ~= nil
+                    if gut[j] == nil then gut[j] = ok else gut[j] = gut[j] and ok end
+                end
+            end
+        end
+    end
+    local zeilen = {}
+    for i, cond in ipairs(conds) do
+        local terms = {}
+        for _, t in ipairs(cond.terms) do terms[#terms + 1] = { f = t.f, q = t.q, ft = t.ft } end
+        zeilen[i] = { i = i, terms = terms, k = cond.k or "0", ktext = cond.ktext, aktiv = true }
+    end
+    -- Anzahl der u-Unbekannten einer Zeile, eine davon, und ob w-Groessen darin stehen
+    local function uUnbek(z)
+        local m, n, j1, wT = {}, 0, nil, false
+        for _, t in ipairs(z.terms) do
+            for j in pairs(t.q.lin.c) do
+                if istU(j) then
+                    if not m[j] then m[j], n, j1 = true, n + 1, j end
+                else
+                    wT = true
+                end
+            end
+        end
+        return n, j1, wT
+    end
+    local function kPlus(a, b, f)                  -- a + f*b als CAS-Text (f Zahl)
+        if b == nil or b == "0" or math.abs(f) < 1e-15 then return a end
+        local teil = (math.abs(f - 1) < 1e-15) and ("(" .. b .. ")") or ("(" .. neuZahl(f) .. ")*(" .. b .. ")")
+        return (a == "0") and teil or (a .. "+" .. teil)
+    end
+    local function fMal(f, z)                       -- Faktor (Zahl oder Text) mal Zahl
+        if type(f) == "number" then return f * z end
+        if math.abs(z - 1) < 1e-15 then return f end
+        return "(" .. neuZahl(z) .. ")*(" .. f .. ")"
+    end
+    local function dazu(terms, f, q, ft)
+        if type(f) == "number" then
+            for idx, t in ipairs(terms) do
+                if t.q == q and type(t.f) == "number" then
+                    t.f = t.f + f
+                    if math.abs(t.f) < 1e-12 then table.remove(terms, idx) end
+                    return
+                end
+            end
+            if math.abs(f) < 1e-12 then return end
+        end
+        terms[#terms + 1] = { f = f, q = q, ft = ft }
+    end
+    local eingesetzt = false
+    while true do
+        -- zuerst Bedingungen nur mit der Laengsgroesse (u1(x1=0)=0), dann die mit Biegelinie
+        local wahl, wj
+        for stufe = 1, 2 do
+            for _, z in ipairs(zeilen) do
+                if z.aktiv then
+                    local n, j, wT = uUnbek(z)
+                    if n == 1 and gut[j] and (stufe == 2 or not wT) then wahl, wj = z, j; break end
+                end
+            end
+            if wahl then break end
+        end
+        if not wahl then break end
+        -- aus der gewaehlten Zeile: x_j = -(andere Terme + K)/A
+        local A, K, andere = 0, wahl.k, {}
+        for _, t in ipairs(wahl.terms) do
+            local cj = t.q.lin.c[wj]
+            if cj then
+                A = A + t.f * zahl(cj)
+                K = kPlus(K, t.q.lin.k, t.f)
+            else
+                andere[#andere + 1] = t
+            end
+        end
+        if math.abs(A) < 1e-12 then return nil end
+        wahl.aktiv, eingesetzt = false, true
+        for _, z in ipairs(zeilen) do
+            if z.aktiv then
+                local neu, k, geaendert = {}, z.k, false
+                for _, t in ipairs(z.terms) do
+                    local cj = t.q.lin.c[wj]
+                    if cj then
+                        -- t.f*(a*x_j + k_t) mit x_j eingesetzt
+                        local r = t.f * zahl(cj) / A
+                        geaendert = true
+                        k = kPlus(k, t.q.lin.k, t.f)
+                        k = kPlus(k, K, -r)
+                        for _, o in ipairs(andere) do
+                            local ft = (type(o.f) ~= "number" and math.abs(r + 1) < 1e-15) and o.ft or nil
+                            dazu(neu, fMal(o.f, -r), o.q, ft)
+                        end
+                    else
+                        dazu(neu, t.f, t.q, t.ft)
+                    end
+                end
+                if geaendert then
+                    z.terms, z.geaendert = neu, true
+                    if k ~= z.k then z.k, z.ktext = k, nil end
+                end
+            end
+        end
+    end
+    if not eingesetzt then return nil end
+    local erg, anzahlW = { w = {}, u = {} }, 0
+    for _, z in ipairs(zeilen) do
+        if z.aktiv then
+            local n, _, wT = uUnbek(z)
+            if n > 0 or not wT then return nil end   -- Laengsgroesse bleibt uebrig: nicht trennbar
+            anzahlW = anzahlW + 1
+            local text
+            if z.geaendert then
+                local kt = z.ktext
+                if not kt and z.k ~= "0" then
+                    -- vereinfachen; der CAS schreibt Symbole klein, also die Schreibweise der Eingabe
+                    -- zurueckholen (h -> H), wie in den uebrigen Bedingungen
+                    kt = neuExakt(z.k)
+                    for name in pairs(sym_vars or {}) do
+                        local klein = name:lower()
+                        if klein ~= name then
+                            kt = kt:gsub("%f[%w_]" .. klein:gsub("%p", "%%%0") .. "%f[^%w_]", name)
+                        end
+                    end
+                end
+                text = rlBedText({ terms = z.terms, k = z.k, ktext = kt })
+            end
+            erg.w[#erg.w + 1] = { i = z.i, text = text }
+        else
+            erg.u[#erg.u + 1] = z.i
+        end
+    end
+    if anzahlW ~= nW then return nil end
+    return erg
+end
+
 -- CAS-String-Auswertung ohne exact/expand (fuer Matrizen)
 local function neuCasString(cmd)
     local res = math.eval("string(" .. cmd .. ")")
@@ -1387,7 +1929,7 @@ local function neuStabDaten(i, s, base, direkt)
     local d = {
         i = i, s = s, L = L, Ls = Ls, EI = EI, EA = EA, base = base, starr = starr, starrI = starrI, kTs = kTs, eTs = eTs,
         tx = dx / L, ty = dy / L, nx = -dy / L, ny = dx / L,
-        wp = wp, up = up,
+        wp = wp, wp1 = wp1, up = up,
         WPL = dirI and "0" or beiL(wp), WP1L = dirI and "0" or beiL(wp1), WP2L = beiL(wp2), IQL = beiL(iq),
         UPL = dirA and "0" or beiL(up), INL = beiL(inn),
     }
@@ -1497,6 +2039,7 @@ local function neuKnotenBedingungen(kidx, k, ends, conds, extra)
         extra.n = extra.n + 2
         local jx, jy = extra.n - 1, extra.n
         extra.names[jx], extra.names[jy] = "ux(K" .. kidx .. ")", "uy(K" .. kidx .. ")"
+        extra.knoten[kidx] = { jx, jy }
         UX = { { f = 1, q = rlGroesse("ux(K" .. kidx .. ")", rlEinheit(jx)) } }
         UY = { { f = 1, q = rlGroesse("uy(K" .. kidx .. ")", rlEinheit(jy)) } }
     end
@@ -1814,7 +2357,7 @@ local function neuRandLGSLoesen(direkt, methodeInfo)
         table.insert(byNode[s.k1], { d = d, side = "A", g = d.A, relM = relA, relN = s.n_gelenk_A, relQ = s.q_gelenk_A })
         table.insert(byNode[s.k2], { d = d, side = "B", g = d.B, relM = relB, relN = s.n_gelenk_B, relQ = s.q_gelenk_B })
     end
-    local conds, extra = {}, { n = #bars * 6, names = {} }
+    local conds, extra = {}, { n = #bars * 6, names = {}, knoten = {} }
     for kidx = 1, #knoten do
         if byNode[kidx] then neuKnotenBedingungen(kidx, knoten[kidx], byNode[kidx], conds, extra) end
     end
@@ -2017,6 +2560,8 @@ local function neuRandLGSLoesen(direkt, methodeInfo)
     end
     local wZeilen, nurW = huelle("w")
     local uZeilen, nurU = huelle("u")
+    -- gekoppelt nur ueber dehnsteife Staebe (Rahmen): u und N durchreichen wie von Hand
+    local durch = (not nurW and not nurU) and neuDurchreichen(conds, typVon, #bars * 4) or nil
     -- vorab eliminierte Unbekannte rueckwaerts aus ihrer Zeile nachrechnen (alle anderen sind bekannt)
     for i = #vorab, 1, -1 do
         local e = vorab[i]
@@ -2076,7 +2621,7 @@ local function neuRandLGSLoesen(direkt, methodeInfo)
             end
         end
     end
-    local count = 0
+    local count, ergStab = 0, {}
     for _, d in ipairs(bars) do
         local b = d.base
         local ew, eu
@@ -2101,10 +2646,35 @@ local function neuRandLGSLoesen(direkt, methodeInfo)
         -- EI*w bzw. EA*u geteilt durch die Steifigkeit; starre Staebe ohne Starrkoerperbewegung: 0
         local wv = wStarr[d.i] and ew or (d.starrI and "0" or ("(" .. ew .. ")/(" .. d.EI .. ")"))
         local uv = uStarr[d.i] and eu or (d.starr and "0" or ("(" .. eu .. ")/(" .. d.EA .. ")"))
-        if not neuCasEval("wv" .. d.i .. "(x):=" .. neuExakt(wv), "wv" .. d.i) then return fehler("Export wv" .. d.i .. " fehlgeschlagen") end
-        if not neuCasEval("uv" .. d.i .. "(x):=" .. neuExakt(uv), "uv" .. d.i) then return fehler("Export uv" .. d.i .. " fehlgeschlagen") end
+        wv, uv = neuExakt(wv), neuExakt(uv)
+        if not neuCasEval("wv" .. d.i .. "(x):=" .. wv, "wv" .. d.i) then return fehler("Export wv" .. d.i .. " fehlgeschlagen") end
+        if not neuCasEval("uv" .. d.i .. "(x):=" .. uv, "uv" .. d.i) then return fehler("Export uv" .. d.i .. " fehlgeschlagen") end
+        -- fuer die Knotenverschiebungen merken; phi = -w' (starr: w = -kappaT*x^2/2 + c3*x + c4)
+        local phi
+        if wStarr[d.i] then
+            phi = "(" .. (d.kTs or "0") .. ")*x-(" .. wStarr[d.i][1] .. ")"
+        elseif d.starrI then
+            phi = "0"
+        else
+            phi = "-((" .. d.wp1 .. ")+(" .. values[b + 1] .. ")*x^2/2+(" .. values[b + 2] .. ")*x+(" .. values[b + 3] .. "))/(" .. d.EI .. ")"
+        end
+        ergStab[d.i] = { wv = wv, uv = uv, phi = phi, Ls = d.Ls, tx = d.tx, ty = d.ty, nx = d.nx, ny = d.ny }
         count = count + 1
     end
+    -- Referenz-Stabenden je Knoten wie in neuKnotenBedingungen: Verschiebung ueber ein Stabende ohne
+    -- N-/Q-Gelenk (sonst die Knoten-Unbekannten ux(K), uy(K)), Verdrehung ueber eines ohne M-Gelenk
+    local ergEnde = {}
+    for kidx, ends in pairs(byNode) do
+        local r = {}
+        for _, e in ipairs(ends) do
+            if not r.trans and not e.relN and not e.relQ then r.trans = { i = e.d.i, side = e.side } end
+            if not r.rot and not e.relM then r.rot = { i = e.d.i, side = e.side } end
+        end
+        local ju = extra.knoten[kidx]
+        if ju then r.ux, r.uy = values[ju[1]] or "0", values[ju[2]] or "0" end
+        ergEnde[kidx] = r
+    end
+    randErgebnis = { stab = ergStab, ende = ergEnde, knoten = {} }
     -- Hinweise zur Bedeutung der Funktionen
     local info = {}
     if #dehnListe > 0 then info[#info + 1] = "dehnsteif (EA->unendlich): Stab " .. table.concat(dehnListe, ",") end
@@ -2121,13 +2691,21 @@ local function neuRandLGSLoesen(direkt, methodeInfo)
         info[#info + 1] = "Biegelinie w ohne Laengslinie loesbar: erste Gruppe in randbed"
     elseif nurU then
         info[#info + 1] = "Laengslinie u ohne Biegelinie loesbar: erste Gruppe in randbed"
+    elseif durch then
+        info[#info + 1] = "Biegelinie w ohne Laengslinie loesbar: erste Gruppe in randbed (u und N der dehnsteifen Staebe eingesetzt)"
     end
     info[#info + 1] = "Verschiebungen: wv_i(x)=w_i(x), uv_i(x)=u_i(x)"
     for i, t in ipairs(info) do info[i] = '"' .. t .. '"' end
     pcall(math.eval, "randinfo:=[" .. table.concat(info, ";") .. "]")
     -- Bedingungsliste als Strings; bei entkoppelten Linien nach w und u sortiert mit Ueberschrift
     local quoted = {}
-    if nurW or nurU then
+    if durch then
+        -- zusammengefasste Bedingungen fuer w, danach die, die u und N der dehnsteifen Staebe liefern
+        quoted[#quoted + 1] = '"--- Biegelinie w: diese genuegen ---"'
+        for _, e in ipairs(durch.w) do quoted[#quoted + 1] = '"' .. (e.text or texts[e.i]) .. '"' end
+        quoted[#quoted + 1] = '"--- zusaetzlich fuer Laengslinie u ---"'
+        for _, i in ipairs(durch.u) do quoted[#quoted + 1] = '"' .. texts[i] .. '"' end
+    elseif nurW or nurU then
         -- erst die Bedingungen, die fuer eine Linie allein genuegen, dann der Rest
         local erst, zweit, titel1, titel2
         if nurW and nurU then
@@ -2153,7 +2731,12 @@ local function neuRandLGSLoesen(direkt, methodeInfo)
         for i, t in ipairs(texts) do quoted[i] = '"' .. t .. '"' end
     end
     pcall(math.eval, "randbed:=[" .. table.concat(quoted, ";") .. "]")   -- Spaltenvektor aus Strings
-    neuExportStatus("Rand-LGS: " .. count .. " Staebe, " .. #texts .. " Bedingungen -> wneu_i(x)=EI*w, uneu_i(x)=EA*u, wv_i(x)=w, uv_i(x)=u, randbed")
+    -- starre Staebe nennen, bei denen wneu bzw. uneu die Verschiebung selbst ist (keine neuen Locals:
+    -- die Funktion ist nah an der Grenze von 200 lokalen Variablen)
+    neuExportStatus("Rand-LGS: " .. count .. " Staebe, " .. #texts .. " Bedingungen -> wneu_i(x)=EI*w, uneu_i(x)=EA*u, wv_i(x)=w, uv_i(x)=u, randbed"
+        .. ((#wListe > 0) and (". Starr: wneu=w bei Stab " .. table.concat(wListe, ",")) or "")
+        .. ((#uListe > 0) and (((#wListe > 0) and ", uneu=u bei Stab " or ". Starr: uneu=u bei Stab ") .. table.concat(uListe, ",")) or "")
+        .. ((#wListe + #uListe > 0) and " (siehe randinfo)" or ""))
     return true
 end
 
@@ -2167,6 +2750,14 @@ local function neuRandLGS()
     for i = 1, math.max(30, #staebe) do
         alt[#alt + 1] = "wneu" .. i; alt[#alt + 1] = "uneu" .. i; alt[#alt + 1] = "wv" .. i; alt[#alt + 1] = "uv" .. i
     end
+    -- Knotenverschiebungen nur loeschen, wenn sie zu einem anderen System gehoeren
+    local schluessel = randLGSCacheSchluessel()
+    if not (randErgebnis and randErgebnis.schluessel == schluessel) then
+        for i = 1, math.max(30, #knoten) do
+            alt[#alt + 1] = "ux_k" .. i; alt[#alt + 1] = "uy_k" .. i; alt[#alt + 1] = "phi_k" .. i
+        end
+    end
+    randErgebnis = nil
     pcall(math.eval, "DelVar " .. table.concat(alt, ","))
     if #staebe == 0 then return neuFehler("Keine Staebe vorhanden") end
     if symbolFehler then return neuFehler("Symbolischer Modus: " .. symbolFehler) end
@@ -2188,7 +2779,8 @@ local function neuRandLGS()
         neuShowMessage("Starre Staebe direkt singulaer (gegenseitig statisch unbestimmt): Grenzwert-Methode")
         ok, err = neuRandLGSLoesen(false, "starre Staebe: Grenzwert (direkt singulaer, starre Teile gegenseitig statisch unbestimmt)")
     end
-    if not ok then return neuFehler(err and err.text or "Rand-LGS fehlgeschlagen") end
+    if not ok then randErgebnis = nil; return neuFehler(err and err.text or "Rand-LGS fehlgeschlagen") end
+    if randErgebnis then randErgebnis.schluessel = schluessel end
     return true
 end
 
@@ -2204,8 +2796,63 @@ exportULinienNeuToTI = function()
     return neuRandLGS()
 end
 
+-- Knotenverschiebung aus dem Rand-LGS (Knotenmenue Seite 4, Zeile 1): ux_k<i>, uy_k<i> global
+-- (x nach rechts, y nach unten), phi_k<i> gegen den Uhrzeigersinn. Die Biege- und Laengslinien werden
+-- nur neu aufgebaut, wenn sich das System seit dem letzten Rand-LGS geaendert hat.
+function exportKnotenVerschiebungToTI(kidx)
+    local titel = "Knoten " .. tostring(kidx) .. ": Verschiebung"
+    if not math.eval then neuExportStatus("Fehler: CAS nicht verfuegbar!", "Export fehlgeschlagen"); return false end
+    local k = knoten[kidx]
+    if not k then return false end
+    if randErgebnis and randErgebnis.schluessel == randLGSCacheSchluessel() then
+        neuShowMessage("Rand-LGS aus dem Speicher (System unveraendert)")
+    elseif not neuRandLGS() then
+        return false
+    end
+    local erg = randErgebnis
+    if not erg then neuExportStatus("Rand-LGS ohne Ergebnis", "Export fehlgeschlagen"); return false end
+    local r = erg.knoten[kidx]
+    if not r then
+        local e = erg.ende[kidx]
+        if not e then neuExportStatus("Knoten " .. kidx .. " haengt an keinem Stab.", "Export fehlgeschlagen"); return false end
+        -- Groesse (uv, wv oder phi) am Stabende: x = 0 am Anfang, x = L am Ende
+        local function amEnde(ref, feld)
+            local st = erg.stab[ref.i]
+            return st[feld]:subx((ref.side == "A") and "0" or ("(" .. st.Ls .. ")")), st
+        end
+        local ux, uy
+        if e.trans then
+            -- U = u*t + w*n mit t = (dx, dy)/L und n = (-dy, dx)/L
+            local u, st = amEnde(e.trans, "uv")
+            local w = amEnde(e.trans, "wv")
+            local function komb(a, b)
+                local t = {}
+                if math.abs(a) > 1e-12 then t[#t + 1] = "(" .. neuZahl(a) .. ")*(" .. u .. ")" end
+                if math.abs(b) > 1e-12 then t[#t + 1] = "(" .. neuZahl(b) .. ")*(" .. w .. ")" end
+                return (#t > 0) and table.concat(t, "+") or "0"
+            end
+            ux, uy = komb(st.tx, st.nx), komb(st.ty, st.ny)
+        else
+            ux, uy = e.ux or "0", e.uy or "0"
+        end
+        r = { ux = neuExakt(ux), uy = neuExakt(uy) }
+        if e.rot then r.phi = neuExakt((amEnde(e.rot, "phi"))) end
+        erg.knoten[kidx] = r
+    end
+    local nx, ny, nphi = "ux_k" .. kidx, "uy_k" .. kidx, "phi_k" .. kidx
+    pcall(math.eval, "DelVar " .. nx .. "," .. ny .. "," .. nphi)
+    local ok = neuCasEval(nx .. ":=" .. r.ux, nx) and neuCasEval(ny .. ":=" .. r.uy, ny)
+    if ok and r.phi then ok = neuCasEval(nphi .. ":=" .. r.phi, nphi) end
+    if not ok then neuExportStatus("Knotenverschiebung konnte nicht gespeichert werden.", "Export fehlgeschlagen"); return false end
+    local function kurz(t) return (#t > 40) and (t:sub(1, 37) .. "...") or t end
+    neuExportStatus(nx .. " = " .. kurz(r.ux) .. "\n" .. ny .. " = " .. kurz(r.uy) .. "\n"
+        .. (r.phi and (nphi .. " = " .. kurz(r.phi)) or "Gelenk: keine Knotenverdrehung")
+        .. "\n(x nach rechts, y nach unten, phi gegen den Uhrzeigersinn)", titel)
+    return true
+end
+
 function exportVerschiebungenToTI()
-    if #staebe == 0 or not staebe[1].mat_k then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
+    if not exportBereit() then zeigeMeldung("Bitte zuerst das System berechnen (Taste B).", "Export fehlgeschlagen"); return end
     exportBiegelinienToTI()
     exportULinienToTI()
     zeigeMeldung("Verschiebungslinien (v*EI und u*EA) fuer alle Staebe exportiert.", "Export")
@@ -2223,16 +2870,13 @@ local function exportKGVToTI()
     local n = #X_Werte
     for i=1, n do Delta[i] = {} end
     
+    -- Klaffung zur Freiwerteinheit X_i. Die Knotenfreiheitsgrade liegen schon im Lagersystem des
+    -- Knotens (buildKnotenTransform: u_xi, u_eta), die Einheitslast eines Lagers wirkt in xi bzw. eta.
     local function getGap(x_val, u_vec)
-        local rad = math.rad(knoten[x_val.knoten] and knoten[x_val.knoten].winkel or 0)
-        if x_val.typ == "lager_x" then 
-            local ux = u_vec[knoten[x_val.knoten].eq_x] or 0
-            local uy = u_vec[knoten[x_val.knoten].eq_y] or 0
-            return ux * math.cos(rad) + uy * math.sin(rad)
-        elseif x_val.typ == "lager_y" then 
-            local ux = u_vec[knoten[x_val.knoten].eq_x] or 0
-            local uy = u_vec[knoten[x_val.knoten].eq_y] or 0
-            return -ux * math.sin(rad) + uy * math.cos(rad)
+        if x_val.typ == "lager_x" then
+            return u_vec[knoten[x_val.knoten].eq_x] or 0
+        elseif x_val.typ == "lager_y" then
+            return u_vec[knoten[x_val.knoten].eq_y] or 0
         elseif x_val.typ == "lager_m" then 
             return u_vec[knoten[x_val.knoten].eq_m] or 0
         elseif x_val.typ == "gelenk_A" then
@@ -2254,10 +2898,15 @@ local function exportKGVToTI()
             local L = math.sqrt(dx^2+dy^2)
             if L <= 1e-12 then return 0 end
             local ux, uy = dx/L, dy/L
-            local u1x = (k1.eq_x > 0) and u_vec[k1.eq_x] or 0
-            local u1y = (k1.eq_y > 0) and u_vec[k1.eq_y] or 0
-            local u2x = (k2.eq_x > 0) and u_vec[k2.eq_x] or 0
-            local u2y = (k2.eq_y > 0) and u_vec[k2.eq_y] or 0
+            -- Knotenverschiebung aus dem Lagersystem (xi, eta) zurueck ins globale System
+            local function global(k)
+                local u_xi = (k.eq_x > 0) and u_vec[k.eq_x] or 0
+                local u_eta = (k.eq_y > 0) and u_vec[k.eq_y] or 0
+                local b = math.rad(k.winkel or 0)
+                return u_xi * math.cos(b) + u_eta * math.sin(b), -u_xi * math.sin(b) + u_eta * math.cos(b)
+            end
+            local u1x, u1y = global(k1)
+            local u2x, u2y = global(k2)
             return (u1x - u2x)*ux + (u1y - u2y)*uy
         end
         return 0
@@ -2304,7 +2953,7 @@ function processDistLoad_PvV(L, L_eff, qs, qa, qb, R_cas, S_cas, R_num, S_num, l
     local R_str, xS_str, S_str
     
     if symbolischer_modus and (qs or qa or qb or R_cas or S_cas) then
-        local cache_key = string.format("%s_%s_%s_%s_%s_%s_%s", tostring(L_eff), tostring(qs), tostring(qa), tostring(qb), tostring(R_cas), tostring(S_cas), tostring(load_type))
+        local cache_key = string.format("%s_%s_%s_%s_%s_%s_%s_%s_%s", tostring(L_eff), tostring(qs), tostring(qa), tostring(qb), tostring(R_cas), tostring(S_cas), tostring(load_type), tostring(symbLSym), tostring(symbLDummy))
         if pvv_cas_cache[cache_key] then
             return pvv_cas_cache[cache_key].R, pvv_cas_cache[cache_key].S, pvv_cas_cache[cache_key].xS
         end
@@ -2313,13 +2962,13 @@ function processDistLoad_PvV(L, L_eff, qs, qa, qb, R_cas, S_cas, R_num, S_num, l
         if qs or qa or qb then
             qs = qs or "0"; qa = qa or "0"; qb = qb or "0"
             if load_type == "m" then
-                table.insert(terms_R, string.format("(%s) * (%s * L)", qs, fN_export(L_eff)))
+                table.insert(terms_R, string.format("(%s) * %s", qs, pvvLaenge(L_eff)))
             elseif load_type == "g" then
-                table.insert(terms_R, string.format("(%s) * (%s * L)", qs, fN_export(L_eff)))
-                table.insert(terms_S, string.format("(%s) * (%s * L^2)", qs, fN_export(L_eff * L/2)))
+                table.insert(terms_R, string.format("(%s) * %s", qs, pvvLaenge(L_eff)))
+                table.insert(terms_S, string.format("(%s) * %s", qs, pvvLaenge(L_eff * L/2, 2)))
             else
-                table.insert(terms_R, string.format("((%s) + ((%s) + (%s))/2) * (%s * L)", qs, qa, qb, fN_export(L_eff)))
-                table.insert(terms_S, string.format("(3*(%s) + (%s) + 2*(%s)) * (%s * L^2) / 6", qs, qa, qb, fN_export(L_eff^2)))
+                table.insert(terms_R, string.format("((%s) + ((%s) + (%s))/2) * %s", qs, qa, qb, pvvLaenge(L_eff)))
+                table.insert(terms_S, string.format("(3*(%s) + (%s) + 2*(%s)) * %s / 6", qs, qa, qb, pvvLaenge(L_eff^2, 2)))
             end
         end
         if R_cas then table.insert(terms_R, "("..R_cas..")") end
@@ -2348,236 +2997,371 @@ function processDistLoad_PvV(L, L_eff, qs, qa, qb, R_cas, S_cas, R_num, S_num, l
     return R_str, S_str, xS_str
 end
 
-exportArbeitssatzToTI = function()
+-- Laenge (Zahl in Modelleinheiten) als Text fuer den PvV-Export: im symbolischen Modus als Vielfaches
+-- des Laengensymbols (symbLSym, Zahlenwert symbLDummy), sonst als Zahl. potenz = Laengendimension
+-- (1 Laenge, 2 Flaeche, -1 pro Laenge, 0 ohne Dimension).
+function pvvLaenge(zahl, potenz)
+    potenz = potenz or 1
+    if not symbolischer_modus or potenz == 0 then return "(" .. fN_export(zahl) .. ")" end
+    local wert = zahl / (symbLDummy or 1) ^ potenz
+    if potenz == 1 then return "(" .. fN_export(wert) .. "*" .. symbLSym .. ")" end
+    if potenz < 0 then return "(" .. fN_export(wert) .. "/" .. symbLSym .. (potenz < -1 and ("^" .. (-potenz)) or "") .. ")" end
+    return "(" .. fN_export(wert) .. "*" .. symbLSym .. "^" .. potenz .. ")"
+end
+
+-- Wert einer Zeile von pvv_kin (Spalte 3) als kurzer Text fuer Zeichnung und Menues, so wie ihn der
+-- Rechner vereinfacht anzeigt: zahl je Bezugsgroesse ref ("φ_0" bzw. "δ_0"), potenz = Laengendimension
+-- wie bei pvvLaenge, z. B. -2*l*φ_0, -sqrt(2)*l*φ_0, φ_0
+function pvvAnzeigeWert(zahl, potenz, ref)
+    if math.abs(zahl) < 1e-12 then return "0" end
+    local symb = symbolischer_modus and potenz ~= 0
+    local wert = symb and zahl / (symbLDummy or 1) ^ potenz or zahl
+    local c = fN_export(wert)
+    if c:match("%.%d%d%d%d%d") then c = string.format("%.4g", wert) end
+    local vorne = (c == "1") and "" or (c == "-1") and "-" or (c .. "*")
+    if not symb then return vorne .. ref end
+    if potenz == 1 then return vorne .. symbLSym .. "*" .. ref end
+    if potenz == -1 then return vorne .. ref .. "/" .. symbLSym end
+    return vorne .. symbLSym .. "^" .. potenz .. "*" .. ref
+end
+
+-- Arbeitssatz des PvV-Modus in drei Ebenen:
+--   w_eq1   reines "Kraft mal Weg": jede Kraft mal ihren Weg (positiv in Richtung der Kraft), jedes
+--           Moment mal den Drehwinkel phi_i seiner Scheibe (gegen den Uhrzeigersinn positiv)
+--   pvv_kin Tabelle: Weg | durch die Bewegung der eigenen Scheibe | durch phi_0 (bzw. delta_0);
+--           darunter die Scheiben phi_i (bzw. delta_i) | phi_i | Faktor * phi_0
+--   pvv_pol Tabelle der Nebenpole: Verschiebung (bzw. Drehung) | ueber Scheibe A | ueber Scheibe B
+--   w_eq2   alles durch die Bezugsscheibe ausgedrueckt (phi_0 bzw. delta_0)
+--   pvvinfo Legende aller Namen
+-- Die freigesetzte Groesse wirkt in der Richtung, die der PvV-Modus zeichnet (H, V: in
+-- Lagerrichtung; M_A gegen den Uhrzeigersinn; Gelenkgroessen M, N, Q als positive Schnittgroessen).
+-- nurTerme = true: nur zurueckgeben (ohne CAS-Speichern, fuer Tests):
+--   eq1_lhs, eq2_lhs, kin (Zeilen {Name, Ausdruck1, Ausdruck0}), pol (Zeilen {Name, A, B}), info
+exportArbeitssatzToTI = function(nurTerme)
     if not in_pvv_release or not kinematic_disk_states then
         zeigeMeldung("Arbeitssatz: bitte zuerst in den PvV-Modus wechseln.", "Export fehlgeschlagen")
         return
     end
-    
+    local zustaende = kinematic_disk_states
+    local function bewegt(z)
+        if not z then return false end
+        if z.type == "rot" then return math.abs(z.phi or 0) > 1e-9 end
+        return math.abs(z.vx or 0) > 1e-9 or math.abs(z.vy or 0) > 1e-9
+    end
+
+    -- Bezugsscheibe: Startscheibe der Kinematik, sonst die erste bewegte (drehende vor verschobener)
     local ref_disk = kinematic_seed_info and kinematic_seed_info.disk or nil
-    if not ref_disk and kinematic_disk_states then
-        for s_idx, state in pairs(kinematic_disk_states) do
-            if state.type == "rot" and math.abs(state.phi) > 1e-9 then
-                ref_disk = s_idx
-                break
-            end
-        end
-        if not ref_disk then
-            for s_idx, state in pairs(kinematic_disk_states) do
-                if state.type == "trans" and (math.abs(state.ux) > 1e-9 or math.abs(state.uy) > 1e-9) then
-                    ref_disk = s_idx
-                    break
-                end
-            end
+    if ref_disk and not bewegt(zustaende[ref_disk]) then ref_disk = nil end
+    if not ref_disk then
+        for s_idx, z in pairs(zustaende) do
+            if z.type == "rot" and bewegt(z) then ref_disk = s_idx; break end
         end
     end
-    
-    local eq1_terms = {}
+    if not ref_disk then
+        for s_idx, z in pairs(zustaende) do
+            if bewegt(z) then ref_disk = s_idx; break end
+        end
+    end
+    local ref = ref_disk and zustaende[ref_disk]
+    -- Bezugsgroesse: Drehwinkel der Bezugsscheibe (intern ist phi im Uhrzeigersinn positiv)
+    -- oder ihre Verschiebung (Betrag des Bewegungsvektors)
+    local ref_rot = ref ~= nil and ref.type == "rot"
+    local ref_betrag = 0
+    if ref then ref_betrag = ref_rot and -ref.phi or math.sqrt(ref.vx^2 + ref.vy^2) end
+    local ref_var = ref_rot and "φ_0" or "δ_0"
+    -- fuer Zeichnung und Menues (nurTerme == "anzeige"): wem ein Beitrag gehoert (Knoten bzw. Stab)
+    -- und die Momente, die auf phi_i arbeiten
+    local besitzer, momentListe = {}, {}
+
     local eq2_terms = {}
     local fN = fN_export
-    local function addTerm(scheibe, d, force_str, is_rot, trans_disp)
-        if type(d) ~= "string" and math.abs(d) < 1e-6 and is_rot then return end
-        if not is_rot and type(trans_disp) ~= "string" and math.abs(trans_disp) < 1e-6 then return end
-        
+    local function istNull(v)
+        return v == nil or v == "0" or (type(v) == "number" and math.abs(v) < 1e-12)
+    end
+    local function kraftText(v)
+        if type(v) == "string" then return "(" .. v .. ")" end
+        return "(" .. fN(v) .. ")"
+    end
+
+    -- Wege fuer w_eq1: wege[name] sammelt die Beitraege der Scheiben (kin1: durch phi_i bzw.
+    -- delta_i, kin0: durch phi_0 bzw. delta_0). Momente arbeiten auf phi_i selbst (momente[i]).
+    local wege, wegReihe, momente = {}, {}, {}
+    local function wegEintrag(name, kraft, info)
+        local w = wege[name]
+        if not w then
+            -- num: Weg je Bezugsgroesse als Zahl (Spalte 3 von pvv_kin); px, py, ex, ey: Ort und Richtung
+            w = { name = name, kraft = kraft, info = info, kin1 = {}, kin0 = {}, num = 0,
+                  knoten = besitzer.knoten, stab = besitzer.stab }
+            wege[name] = w; wegReihe[#wegReihe + 1] = w
+        end
+        return w
+    end
+    local function scheibenVar(i)
+        local z = zustaende[i]
+        return ((z and z.type == "trans") and "δ_" or "φ_") .. i
+    end
+
+    -- Beitrag an Scheibe `scheibe`:
+    --   Drehung:      Weg = hebel * phi_i   (hebel: Text mit Laengendimension, 1 fuer Momente)
+    --   Verschiebung: Weg = Richtungskosinus * delta_i (trans_disp: Verschiebung in Kraftrichtung)
+    -- weg: Eintrag aus wegEintrag; ohne weg ist es ein Moment (Wert hebel * Kraft) auf phi_i.
+    -- vz = -1: Gegenseite eines Gelenks (Kraft dort entgegengesetzt).
+    -- h_num: Hebel als Zahl fuer die Zeichnung (fehlt er, gilt hebel, falls das eine Zahl ist).
+    local function addTerm(scheibe, hebel, force_str, is_rot, trans_disp, weg, vz, h_num)
+        local z = zustaende[scheibe]
+        if not bewegt(z) or not ref then return end
+        vz = vz or 1
         if is_rot then
-            local k_val = 0
-            if ref_disk and kinematic_disk_states[ref_disk].type == "rot" and math.abs(kinematic_disk_states[ref_disk].phi) > 1e-9 then
-                k_val = kinematic_disk_states[scheibe].phi / kinematic_disk_states[ref_disk].phi
+            if z.type ~= "rot" then return end
+            if type(hebel) == "number" and math.abs(hebel) < 1e-9 then return end
+            local h_str = type(hebel) == "string" and hebel or ("(" .. fN(hebel) .. ")")
+            if vz < 0 then h_str = "(-" .. h_str .. ")" end
+            -- Drehwinkel je Bezugsgroesse (bei verschobener Bezugsscheibe: pro Laenge)
+            local k = -z.phi / ref_betrag
+            local faktor = pvvLaenge(k, ref_rot and 0 or -1)
+            if math.abs(k) > 1e-12 then
+                table.insert(eq2_terms, string.format("%s * %s * %s", faktor, h_str, force_str))
             end
-            local d_str = type(d) == "string" and string.format("(%s)", d) or string.format("(%s)", fN(d))
-            local var_name = (scheibe == ref_disk) and "φ_0" or string.format("φ_%d", scheibe)
-            table.insert(eq1_terms, string.format("%s * %s * %s", var_name, d_str, force_str))
-            table.insert(eq2_terms, string.format("(%s) * %s * %s", fN(k_val), d_str, force_str))
-        else
-            local var_name = string.format("δ_%d", scheibe)
-            table.insert(eq1_terms, string.format("%s * %s", var_name, force_str))
-            local k_val = 0
-            if ref_disk and kinematic_disk_states[ref_disk].type == "rot" and math.abs(kinematic_disk_states[ref_disk].phi) > 1e-9 then
-                local base_k = -1 / kinematic_disk_states[ref_disk].phi
-                if type(trans_disp) == "string" then
-                    table.insert(eq2_terms, symbolischer_modus and string.format("(%s * L) * (%s) * %s", fN(base_k), trans_disp, force_str) or string.format("(%s) * (%s) * %s", fN(base_k), trans_disp, force_str))
-                else
-                    k_val = base_k * trans_disp
-                    table.insert(eq2_terms, symbolischer_modus and string.format("(%s * L) * %s", fN(k_val), force_str) or string.format("(%s) * %s", fN(k_val), force_str))
-                end
+            if weg then
+                table.insert(weg.kin1, string.format("%s * %s", h_str, scheibenVar(scheibe)))
+                table.insert(weg.kin0, string.format("%s * %s", faktor, h_str))
+                weg.num = weg.num + vz * (h_num or (type(hebel) == "number" and hebel) or 0) * k
             else
-                if type(trans_disp) == "string" then
-                    table.insert(eq2_terms, symbolischer_modus and string.format("(0.0000 * L) * (%s) * %s", trans_disp, force_str) or string.format("(0.0000) * (%s) * %s", trans_disp, force_str))
-                else
-                    table.insert(eq2_terms, symbolischer_modus and string.format("(0.0000 * L) * %s", force_str) or string.format("(0.0000) * %s", force_str))
-                end
-            end
-        end
-    end
-
-    local function processForce(scheibe, px, py, fx, fy, fm, is_moment_only)
-        local d_state = kinematic_disk_states[scheibe]
-        if not d_state then return end
-        
-        if d_state.type == "rot" then
-            if fx and (type(fx)=="string" or math.abs(fx) > 0) then
-                local d_y = (py - d_state.cy)
-                local str_d = symbolischer_modus and string.format("(%s * L)", fN(d_y)) or string.format("(%s)", fN(d_y))
-                addTerm(scheibe, str_d, type(fx)=="string" and fx or fN(fx), true)
-            end
-            if fy and (type(fy)=="string" or math.abs(fy) > 0) then
-                local d_x = -(px - d_state.cx)
-                local str_d = symbolischer_modus and string.format("(%s * L)", fN(d_x)) or string.format("(%s)", fN(d_x))
-                addTerm(scheibe, str_d, type(fy)=="string" and fy or fN(fy), true)
-            end
-            if fm and (type(fm)=="string" or math.abs(fm) > 0) then
-                addTerm(scheibe, 1, type(fm)=="string" and fm or fN(fm), true)
+                local m = momente[scheibe] or {}
+                momente[scheibe] = m
+                table.insert(m, string.format("%s * %s", h_str, force_str))
+                momentListe[#momentListe + 1] = { text = string.format("%s * %s * %s", h_str, force_str, scheibenVar(scheibe)),
+                    scheibe = scheibe, knoten = besitzer.knoten, stab = besitzer.stab }
             end
         else
-            if fx and (type(fx)=="string" or math.abs(fx) > 0) then
-                addTerm(scheibe, 0, type(fx)=="string" and fx or fN(fx), false, d_state.vx)
-            end
-            if fy and (type(fy)=="string" or math.abs(fy) > 0) then
-                addTerm(scheibe, 0, type(fy)=="string" and fy or fN(fy), false, d_state.vy)
+            if z.type ~= "trans" or math.abs(trans_disp or 0) < 1e-9 then return end
+            local betrag = math.sqrt(z.vx^2 + z.vy^2)
+            local td = trans_disp * vz
+            -- Verschiebung je Bezugsgroesse (bei drehender Bezugsscheibe: Laenge; phi_0 = -phi_ref intern)
+            local anteil0 = pvvLaenge(td / ref_betrag, ref_rot and 1 or 0)
+            table.insert(eq2_terms, string.format("%s * %s", anteil0, force_str))
+            if weg then
+                table.insert(weg.kin1, string.format("(%s) * %s", fN(td / betrag), scheibenVar(scheibe)))
+                table.insert(weg.kin0, anteil0)
+                weg.num = weg.num + td / ref_betrag
             end
         end
     end
 
+    -- Kraft `kraft` in Richtung e = (ex, ey) (global, y nach unten) im Punkt (px, py)
+    local function processForce(scheibe, px, py, kraft, ex, ey, weg, vz)
+        local z = zustaende[scheibe]
+        if not z or istNull(kraft) then return end
+        if weg and not weg.px then weg.px, weg.py, weg.ex, weg.ey = px, py, ex, ey end
+        if z.type == "rot" then
+            -- Weg in Richtung e je Drehwinkel: (py - cy) * ex - (px - cx) * ey, mit exakten Faktoren
+            local teile = {}
+            if math.abs(ex) > 1e-12 and math.abs(py - z.cy) > 1e-9 then
+                teile[#teile + 1] = math.abs(ex - 1) < 1e-12 and pvvLaenge(py - z.cy) or (pvvLaenge(py - z.cy) .. "*(" .. fN(ex) .. ")")
+            end
+            if math.abs(ey) > 1e-12 and math.abs(px - z.cx) > 1e-9 then
+                teile[#teile + 1] = math.abs(ey - 1) < 1e-12 and pvvLaenge(-(px - z.cx)) or (pvvLaenge(-(px - z.cx)) .. "*(" .. fN(ey) .. ")")
+            end
+            if #teile > 0 then
+                local h = #teile == 1 and teile[1] or ("(" .. table.concat(teile, " + ") .. ")")
+                addTerm(scheibe, h, kraftText(kraft), true, nil, weg, vz, (py - z.cy) * ex - (px - z.cx) * ey)
+            end
+        else
+            addTerm(scheibe, 0, kraftText(kraft), false, z.vx * ex + z.vy * ey, weg, vz)
+        end
+    end
+    local function processMoment(scheibe, kraft, vz)
+        if istNull(kraft) then return end
+        addTerm(scheibe, 1, kraftText(kraft), true, nil, nil, vz)
+    end
+
+    -- Scheibe, deren Bewegung ein Knoten mitmacht: ein Stab ohne Gelenk an diesem Knoten (auch eine
+    -- feste Scheibe, dann leistet die Last keine Arbeit); sonst der erste Stab (reines Momentengelenk:
+    -- gleiche Verschiebung fuer alle Staebe)
+    local function knotenScheibe(i)
+        local erste = nil
+        for _, s in ipairs(staebe) do
+            if s.k1 == i or s.k2 == i then
+                local am_anfang = (s.k1 == i)
+                local gelenk = am_anfang and (s.gelenk_A or s.n_gelenk_A or s.q_gelenk_A) or (not am_anfang and (s.gelenk_B or s.n_gelenk_B or s.q_gelenk_B))
+                if not gelenk then return s.scheibe end
+                erste = erste or s.scheibe
+            end
+        end
+        return erste
+    end
+
+    -- Knotenlasten: im symbolischen Modus mit ihren Namen; jede eingegebene Komponente mit eigenem
+    -- Weg in ihrer Richtung (last_w dreht das Lastsystem wie in der Berechnung)
     for i, k in ipairs(knoten) do
-        local fx, fy, fm = k.last_x or 0, k.last_y or 0, k.last_m or 0
-        local fx_pass, fy_pass = fx, fy
-        if k.last_w and k.last_w ~= 0 then
-            local rad = math.rad(k.last_w)
-            local tfx = fx * math.cos(rad) - fy * math.sin(rad)
-            local tfy = fx * math.sin(rad) + fy * math.cos(rad)
-            
-            if zahlenFormat ~= 3 then
-                -- Build symbolic CAS strings so the CAS can compute exact trig
-                local w_str = fN(k.last_w)
-                local parts_x, parts_y = {}, {}
-                if math.abs(fx) > 1e-6 then
-                    table.insert(parts_x, fN(fx) .. "*cos(" .. w_str .. ")")
-                    table.insert(parts_y, fN(fx) .. "*sin(" .. w_str .. ")")
-                end
-                if math.abs(fy) > 1e-6 then
-                    table.insert(parts_x, "(-" .. fN(fy) .. "*sin(" .. w_str .. "))")
-                    table.insert(parts_y, fN(fy) .. "*cos(" .. w_str .. ")")
-                end
-                fx_pass = #parts_x > 0 and "(" .. table.concat(parts_x, "+") .. ")" or 0
-                fy_pass = #parts_y > 0 and "(" .. table.concat(parts_y, "+") .. ")" or 0
-            else
-                fx_pass, fy_pass = tfx, tfy
+        besitzer = { knoten = i }
+        local lx, ly, lm = k.last_x or 0, k.last_y or 0, k.last_m or 0
+        if math.abs(lx) > 1e-12 or math.abs(ly) > 1e-12 or math.abs(lm) > 1e-12 then
+            local function lastWert(zahl, text)
+                if math.abs(zahl) < 1e-12 then return 0 end
+                if symbolischer_modus and type(text) == "string" and text ~= "" then return text end
+                return zahl
             end
-            fx, fy = tfx, tfy
-        end
-        if math.abs(fx) > 1e-4 or math.abs(fy) > 1e-4 or math.abs(fm) > 1e-4 then
-            local scheibe = nil
-            for j, s in ipairs(staebe) do
-                if s.k1 == i or s.k2 == i then scheibe = s.scheibe; break end
+            local sx, sy, sm = lastWert(lx, k.last_x_str), lastWert(ly, k.last_y_str), lastWert(lm, k.last_m_str)
+            local rl = math.rad(-(k.last_w or 0))
+            local cl, sl = math.cos(rl), math.sin(rl)
+            local gedreht = math.abs(k.last_w or 0) > 1e-9 and string.format(", Lastsystem um %g Grad gedreht", k.last_w) or ""
+            local scheibe = knotenScheibe(i)
+            if scheibe then
+                if not istNull(sx) then
+                    processForce(scheibe, k.x, k.y, sx, cl, sl,
+                        wegEintrag("δ_k" .. i .. "x", sx, "Knoten " .. i .. ", Verschiebung in Richtung der x-Last (nach rechts" .. gedreht .. ")"))
+                end
+                if not istNull(sy) then
+                    processForce(scheibe, k.x, k.y, sy, -sl, cl,
+                        wegEintrag("δ_k" .. i .. "y", sy, "Knoten " .. i .. ", Verschiebung in Richtung der y-Last (nach unten" .. gedreht .. ")"))
+                end
+                processMoment(scheibe, sm)
             end
-            if scheibe then processForce(scheibe, k.x, k.y, fx_pass, fy_pass, fm) end
         end
     end
 
     for i, s in ipairs(staebe) do
-        local d_state = kinematic_disk_states[s.scheibe]
+        besitzer = { stab = i }
+        local d_state = zustaende[s.scheibe]
         if d_state then
             local k1, k2 = knoten[s.k1], knoten[s.k2]
             local dx, dy = k2.x - k1.x, k2.y - k1.y
             local L = math.sqrt(dx^2 + dy^2)
-            if L > 1e-6 then
+            if L > 1e-6 and istBogen(s) then
+                -- Bogen: Lasten wie in der FEM auf dem Bogen (bogenLastResultierende); auf der starren
+                -- Scheibe leistet ihre Resultierende dieselbe Arbeit, angesetzt auf der Wirkungslinie
+                local r = bogenHatLast(s) and bogenLastResultierende(s)
+                if r then
+                    local Fx, Fy, M = r.summe[1], r.summe[2], r.summe[3]
+                    if math.abs(Fx) > 1e-12 or math.abs(Fy) > 1e-12 then
+                        local wx, wy = bogenWirkungspunkt(s, Fx, Fy, M)
+                        if math.abs(Fx) > 1e-12 then
+                            processForce(s.scheibe, wx, wy, Fx, 1, 0, wegEintrag("δ_s" .. i .. "x", Fx, "Stab " .. i .. " (Bogen), Verschiebung der Resultierenden aller Bogenlasten in x (nach rechts)"))
+                        end
+                        if math.abs(Fy) > 1e-12 then
+                            processForce(s.scheibe, wx, wy, Fy, 0, 1, wegEintrag("δ_s" .. i .. "y", Fy, "Stab " .. i .. " (Bogen), Verschiebung der Resultierenden aller Bogenlasten in y (nach unten)"))
+                        end
+                    else
+                        processMoment(s.scheibe, M)
+                    end
+                end
+            elseif L > 1e-6 then
                 local cosA, sinA = dx/L, dy/L
-                
+
+                -- Querlast (Richtung z = (-sinA, cosA)), Resultierende im Abstand xS von k1
                 local qA = s.q + (s.q_A or 0); local qB = s.q + (s.q_B or 0)
                 local Rq_num = (qA + qB)/2 * L + (s.R_q_cas or 0)
                 local Sq_num = (L^2)/6 * (qA + 2*qB) + (s.S_q_cas or 0)
                 local Rq_str, Sq_str, xSq_str = processDistLoad_PvV(L, L, s.q_str, s.q_A_str, s.q_B_str, s.R_q_cas_str, s.S_q_cas_str, Rq_num, Sq_num, "q")
                 if Rq_str then
+                    local weg = wegEintrag("δ_s" .. i .. "q", "(" .. Rq_str .. ")", "Stab " .. i .. ", Verschiebung der Resultierenden der Querlast quer zum Stab (Richtung der Last, zur gestrichelten Faser)")
                     if d_state.type == "rot" then
-                        local c_qA = -sinA * (k1.y - d_state.cy) - cosA * (k1.x - d_state.cx)
-                        local term1 = symbolischer_modus and string.format("(%s * L)", fN(c_qA)) or string.format("(%s)", fN(c_qA))
+                        local term1 = pvvLaenge(-sinA * (k1.y - d_state.cy) - cosA * (k1.x - d_state.cx))
                         local d_str = xSq_str and string.format("(%s - (%s))", term1, xSq_str) or term1
-                        addTerm(s.scheibe, d_str, Rq_str, true)
+                        local xs = (xSq_str and math.abs(Rq_num) > 1e-12) and Sq_num / Rq_num or 0
+                        addTerm(s.scheibe, d_str, "(" .. Rq_str .. ")", true, nil, weg, nil,
+                            -sinA * (k1.y - d_state.cy) - cosA * (k1.x - d_state.cx) - xs)
                     else
-                        addTerm(s.scheibe, 0, Rq_str, false, -sinA * d_state.vx + cosA * d_state.vy)
+                        addTerm(s.scheibe, 0, "(" .. Rq_str .. ")", false, -sinA * d_state.vx + cosA * d_state.vy, weg)
                     end
                 elseif Sq_str then
-                    if d_state.type == "rot" then addTerm(s.scheibe, -1, Sq_str, true) end
+                    -- Resultierende 0, aber ein Moment (z. B. antimetrische Trapezlast)
+                    if d_state.type == "rot" then addTerm(s.scheibe, -1, "(" .. Sq_str .. ")", true) end
                 end
-                
+
+                -- Laengslast: Wirkungslinie ist die Stabachse, der Hebel haengt nicht von der Lage ab
                 local nA = s.n + (s.n_A or 0); local nB = s.n + (s.n_B or 0)
                 local Rn_num = (nA + nB)/2 * L + (s.R_n_cas or 0)
                 local Sn_num = (s.S_n_cas or 0)
-                local Rn_str, Sn_str, xSn_str = processDistLoad_PvV(L, L, s.n_str, s.n_A_str, s.n_B_str, s.R_n_cas_str, s.S_n_cas_str, Rn_num, Sn_num, "q")
+                local Rn_str = processDistLoad_PvV(L, L, s.n_str, s.n_A_str, s.n_B_str, s.R_n_cas_str, s.S_n_cas_str, Rn_num, Sn_num, "q")
                 if Rn_str then
+                    local weg = wegEintrag("δ_s" .. i .. "n", "(" .. Rn_str .. ")", "Stab " .. i .. ", Verschiebung der Resultierenden der Laengslast in Stabrichtung")
                     if d_state.type == "rot" then
-                        local c_nA = cosA * (k1.y - d_state.cy) - sinA * (k1.x - d_state.cx)
-                        addTerm(s.scheibe, fN(c_nA), Rn_str, true)
+                        local hn = cosA * (k1.y - d_state.cy) - sinA * (k1.x - d_state.cx)
+                        addTerm(s.scheibe, pvvLaenge(hn), "(" .. Rn_str .. ")", true, nil, weg, nil, hn)
                     else
-                        addTerm(s.scheibe, 0, Rn_str, false, cosA * d_state.vx + sinA * d_state.vy)
+                        addTerm(s.scheibe, 0, "(" .. Rn_str .. ")", false, cosA * d_state.vx + sinA * d_state.vy, weg)
                     end
-                elseif Sn_str then
-                    if d_state.type == "rot" then addTerm(s.scheibe, -1, Sn_str, true) end
                 end
-                
+
                 local gx_val = s.gx or 0
                 local L_eff_gx = s.gx_proj and math.abs(dy) or L
                 local Rgx_num = gx_val * L_eff_gx + (s.R_gx_cas or 0)
-                local Sgx_num = Rgx_num * (L/2) + (s.S_gx_cas or 0)
+                local Sgx_num = gx_val * L_eff_gx * (L/2) + (s.S_gx_cas or 0)
                 local Rgx_str, Sgx_str, xSgx_str = processDistLoad_PvV(L, L_eff_gx, s.gx_str, nil, nil, s.R_gx_cas_str, s.S_gx_cas_str, Rgx_num, Sgx_num, "g")
                 if Rgx_str then
+                    local weg = wegEintrag("δ_s" .. i .. "x", "(" .. Rgx_str .. ")", "Stab " .. i .. ", Verschiebung der Resultierenden der globalen Linienlast in x (nach rechts)")
                     if d_state.type == "rot" then
-                        local c_gxA = (k1.y - d_state.cy)
-                        local term1 = symbolischer_modus and string.format("(%s * L)", fN(c_gxA)) or string.format("(%s)", fN(c_gxA))
-                        local d_str = xSgx_str and string.format("(%s + (%s) * %s)", term1, xSgx_str, fN(sinA)) or term1
-                        addTerm(s.scheibe, d_str, Rgx_str, true)
+                        local term1 = pvvLaenge(k1.y - d_state.cy)
+                        local d_str = xSgx_str and string.format("(%s + (%s) * (%s))", term1, xSgx_str, fN(sinA)) or term1
+                        local xs = (xSgx_str and math.abs(Rgx_num) > 1e-12) and Sgx_num / Rgx_num or 0
+                        addTerm(s.scheibe, d_str, "(" .. Rgx_str .. ")", true, nil, weg, nil, (k1.y - d_state.cy) + xs * sinA)
                     else
-                        addTerm(s.scheibe, 0, Rgx_str, false, d_state.vx)
+                        addTerm(s.scheibe, 0, "(" .. Rgx_str .. ")", false, d_state.vx, weg)
                     end
                 elseif Sgx_str then
-                    if d_state.type == "rot" then addTerm(s.scheibe, sinA, Sgx_str, true) end
+                    if d_state.type == "rot" then addTerm(s.scheibe, sinA, "(" .. Sgx_str .. ")", true) end
                 end
-                
+
                 local gy_val = s.gy or 0
                 local L_eff_gy = s.gy_proj and math.abs(dx) or L
                 local Rgy_num = gy_val * L_eff_gy + (s.R_gy_cas or 0)
-                local Sgy_num = Rgy_num * (L/2) + (s.S_gy_cas or 0)
+                local Sgy_num = gy_val * L_eff_gy * (L/2) + (s.S_gy_cas or 0)
                 local Rgy_str, Sgy_str, xSgy_str = processDistLoad_PvV(L, L_eff_gy, s.gy_str, nil, nil, s.R_gy_cas_str, s.S_gy_cas_str, Rgy_num, Sgy_num, "g")
                 if Rgy_str then
+                    local weg = wegEintrag("δ_s" .. i .. "y", "(" .. Rgy_str .. ")", "Stab " .. i .. ", Verschiebung der Resultierenden der globalen Linienlast in y (nach unten)")
                     if d_state.type == "rot" then
-                        local c_gyA = -(k1.x - d_state.cx)
-                        local term1 = symbolischer_modus and string.format("(%s * L)", fN(c_gyA)) or string.format("(%s)", fN(c_gyA))
-                        local d_str = xSgy_str and string.format("(%s - (%s) * %s)", term1, xSgy_str, fN(cosA)) or term1
-                        addTerm(s.scheibe, d_str, Rgy_str, true)
+                        local term1 = pvvLaenge(-(k1.x - d_state.cx))
+                        local d_str = xSgy_str and string.format("(%s - (%s) * (%s))", term1, xSgy_str, fN(cosA)) or term1
+                        local xs = (xSgy_str and math.abs(Rgy_num) > 1e-12) and Sgy_num / Rgy_num or 0
+                        addTerm(s.scheibe, d_str, "(" .. Rgy_str .. ")", true, nil, weg, nil, -(k1.x - d_state.cx) - xs * cosA)
                     else
-                        addTerm(s.scheibe, 0, Rgy_str, false, d_state.vy)
+                        addTerm(s.scheibe, 0, "(" .. Rgy_str .. ")", false, d_state.vy, weg)
                     end
                 elseif Sgy_str then
-                    if d_state.type == "rot" then addTerm(s.scheibe, -cosA, Sgy_str, true) end
+                    if d_state.type == "rot" then addTerm(s.scheibe, -cosA, "(" .. Sgy_str .. ")", true) end
                 end
-                
+
                 local Rm_num = (s.m or 0) * L + (s.R_m_cas or 0)
                 local Rm_str = processDistLoad_PvV(L, L, s.m_str, nil, nil, s.R_m_cas_str, nil, Rm_num, 0, "m")
                 if Rm_str then
-                    if d_state.type == "rot" then addTerm(s.scheibe, 1, Rm_str, true) end
+                    if d_state.type == "rot" then addTerm(s.scheibe, 1, "(" .. Rm_str .. ")", true) end
                 end
             end
         end
     end
 
+    -- freigesetzte Bindung als aeussere Last (Richtung wie in der PvV-Zeichnung)
+    local function andereScheibe(nodeIdx, stabIdx)
+        for j, s2 in ipairs(staebe) do
+            if j ~= stabIdx and (s2.k1 == nodeIdx or s2.k2 == nodeIdx) then return s2.scheibe end
+        end
+        return nil
+    end
     if pvv_released_binding then
         local b = pvv_released_binding
         if b.type == "lager_x" or b.type == "lager_y" or b.type == "lager_m" then
+            besitzer = { knoten = b.node }
             local k = knoten[b.node]
-            local scheibe = nil
-            for j, s in ipairs(staebe) do
-                if s.k1 == b.node or s.k2 == b.node then scheibe = s.scheibe; break end
-            end
-            if scheibe then 
-                if b.type == "lager_x" then processForce(scheibe, k.x, k.y, "H", 0, 0)
-                elseif b.type == "lager_y" then processForce(scheibe, k.x, k.y, 0, "V", 0)
-                elseif b.type == "lager_m" then processForce(scheibe, k.x, k.y, 0, 0, "M_A") end
+            local scheibe = knotenScheibe(b.node)
+            if scheibe then
+                local wr = math.rad(k.winkel or 0)
+                local cw, sw = math.cos(wr), math.sin(wr)
+                -- Lagerrichtungen wie in der Berechnung: xi = (cos, -sin), eta = (sin, cos)
+                if b.type == "lager_x" then
+                    processForce(scheibe, k.x, k.y, "H", cw, -sw, wegEintrag("δ_H", "H", "Lager Knoten " .. b.node .. ", Verschiebung in Richtung von H"))
+                elseif b.type == "lager_y" then
+                    processForce(scheibe, k.x, k.y, "V", sw, cw, wegEintrag("δ_V", "V", "Lager Knoten " .. b.node .. ", Verschiebung in Richtung von V"))
+                else processMoment(scheibe, "M_A") end
             end
         elseif b.type == "q_gelenk" or b.type == "n_gelenk" then
+            -- positive Schnittkraft: am Stabanfang entgegen, am Stabende in Richtung der Stabachse
+            -- (N) bzw. der Stabnormalen z = (-sinA, cosA) (Q); auf der Gegenseite umgekehrt
             local s = staebe[b.stab]
             local nodeIdx = b.endA and s.k1 or s.k2
+            besitzer = { stab = b.stab, knoten = nodeIdx }
             local k_node = knoten[nodeIdx]
-            
             local dx, dy = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
             local L = math.sqrt(dx^2 + dy^2)
             if L > 0 then
@@ -2585,57 +3369,169 @@ exportArbeitssatzToTI = function()
                 if b.type == "q_gelenk" then nx, ny = -ny, nx end
                 local dir = b.endA and -1 or 1
                 local ax, ay = nx * dir, ny * dir
-                
                 local force_var = (b.type == "q_gelenk") and "Q" or "N"
-                local fx_str = (math.abs(ax) > 1e-6) and string.format("(%s * %s)", fN(ax), force_var) or nil
-                local fy_str = (math.abs(ay) > 1e-6) and string.format("(%s * %s)", fN(ay), force_var) or nil
-                
-                processForce(s.scheibe, k_node.x, k_node.y, fx_str, fy_str, 0)
-                
-                local other_scheibe = nil
-                for j, s2 in ipairs(staebe) do
-                    if j ~= b.stab and (s2.k1 == nodeIdx or s2.k2 == nodeIdx) then other_scheibe = s2.scheibe; break end
-                end
-                if other_scheibe then
-                    local n_fx_str = (math.abs(ax) > 1e-6) and string.format("(%s * %s)", fN(-ax), force_var) or nil
-                    local n_fy_str = (math.abs(ay) > 1e-6) and string.format("(%s * %s)", fN(-ay), force_var) or nil
-                    processForce(other_scheibe, k_node.x, k_node.y, n_fx_str, n_fy_str, 0)
-                end
+                local weg = wegEintrag("δ_G", force_var, "Gelenk Stab " .. b.stab .. (b.endA and " (Anfang)" or " (Ende)")
+                    .. ", gegenseitige Verschiebung in Richtung von " .. force_var)
+                processForce(s.scheibe, k_node.x, k_node.y, force_var, ax, ay, weg)
+                local other_scheibe = andereScheibe(nodeIdx, b.stab)
+                if other_scheibe then processForce(other_scheibe, k_node.x, k_node.y, force_var, ax, ay, weg, -1) end
             end
-        elseif b.type == "m_gelenk" then
-            local s = staebe[b.stab]
-            local nodeIdx = b.endA and s.k1 or s.k2
-            local k_node = knoten[nodeIdx]
-            
-            local force_var = "M"
-            local dir = b.endA and 1 or -1
-            local fm_str = string.format("(%d * %s)", dir, force_var)
-            processForce(s.scheibe, k_node.x, k_node.y, 0, 0, fm_str)
-            
-            local other_scheibe = nil
-            for j, s2 in ipairs(staebe) do
-                if j ~= b.stab and (s2.k1 == nodeIdx or s2.k2 == nodeIdx) then other_scheibe = s2.scheibe; break end
+        elseif b.type == "m_gelenk" or b.type == "knoten_gelenk" then
+            -- positives Schnittmoment des (ersten) Stabes am Gelenk: am Stabanfang im Uhrzeigersinn, am
+            -- Stabende gegen den Uhrzeigersinn; Gegenmoment an der anderen Scheibe. Weg: gegenseitige
+            -- Verdrehung phi_G.
+            local s_idx, o_scheibe, nodeIdx
+            if b.type == "m_gelenk" then
+                s_idx = b.stab
+                nodeIdx = b.endA and staebe[b.stab].k1 or staebe[b.stab].k2
+                o_scheibe = andereScheibe(nodeIdx, b.stab)
+            else
+                nodeIdx = b.node
+                local s2_idx = nil
+                for j, s in ipairs(staebe) do
+                    if s.k1 == b.node or s.k2 == b.node then
+                        if not s_idx then s_idx = j elseif not s2_idx then s2_idx = j end
+                    end
+                end
+                o_scheibe = s2_idx and staebe[s2_idx].scheibe
             end
-            if other_scheibe then
-                local n_fm_str = string.format("(%d * %s)", -dir, force_var)
-                processForce(other_scheibe, k_node.x, k_node.y, 0, 0, n_fm_str)
+            if s_idx then
+                besitzer = { knoten = nodeIdx, stab = (b.type == "m_gelenk") and s_idx or nil }
+                local dir = (staebe[s_idx].k1 == nodeIdx) and -1 or 1
+                local weg = wegEintrag("φ_G", "M", "Gelenk Knoten " .. nodeIdx .. ", gegenseitige Verdrehung (Arbeit des Gelenkmoments M)")
+                addTerm(staebe[s_idx].scheibe, dir, "(M)", true, nil, weg)
+                if o_scheibe then addTerm(o_scheibe, -dir, "(M)", true, nil, weg) end
             end
         end
     end
-    
-    local eq1_lhs = #eq1_terms > 0 and table.concat(eq1_terms, " + ") or "0"
-    local ref_var = ref_disk and (kinematic_disk_states[ref_disk].type == "rot" and "φ_0" or string.format("δ_%d", ref_disk)) or "φ_0"
+
+    -- w_eq1: Kraft mal Weg, Momente mal Drehwinkel ihrer Scheibe
+    local scheibenNr = {}
+    for i in pairs(zustaende) do scheibenNr[#scheibenNr + 1] = i end
+    table.sort(scheibenNr)
+    local eq1_parts, kin, info = {}, {}, {}
+    for _, w in ipairs(wegReihe) do
+        if #w.kin1 > 0 then
+            eq1_parts[#eq1_parts + 1] = kraftText(w.kraft) .. " * " .. w.name
+            kin[#kin + 1] = { w.name, table.concat(w.kin1, " + "), "(" .. table.concat(w.kin0, " + ") .. ") * " .. ref_var }
+            info[#info + 1] = w.name .. ": " .. w.info
+        end
+    end
+    for _, i in ipairs(scheibenNr) do
+        if momente[i] and #momente[i] > 0 then
+            eq1_parts[#eq1_parts + 1] = "(" .. table.concat(momente[i], " + ") .. ") * " .. scheibenVar(i)
+        end
+    end
+    -- Scheiben: Drehwinkel (bzw. Verschiebung) je Bezugsgroesse
+    for _, i in ipairs(scheibenNr) do
+        local z = zustaende[i]
+        if bewegt(z) and ref then
+            local v = scheibenVar(i)
+            local faktor = z.type == "rot" and pvvLaenge(-z.phi / ref_betrag, ref_rot and 0 or -1)
+                or pvvLaenge(math.sqrt(z.vx^2 + z.vy^2) / ref_betrag, ref_rot and 1 or 0)
+            kin[#kin + 1] = { v, v, faktor .. " * " .. ref_var }
+            info[#info + 1] = v .. ": " .. (z.type == "rot" and "Drehwinkel von Scheibe " .. i .. " (gegen den Uhrzeigersinn)"
+                or "Verschiebung von Scheibe " .. i .. " in ihrer Bewegungsrichtung") .. ((i == ref_disk) and ", Bezugsscheibe" or "")
+        end
+    end
+    local eq1_lhs = #eq1_parts > 0 and table.concat(eq1_parts, " + ") or "0"
     local eq2_lhs = #eq2_terms > 0 and (ref_var .. " * (" .. table.concat(eq2_terms, " + ") .. ")") or "0"
-    
+
+    -- Nebenpole zwischen zwei bewegten Scheiben: dieselbe Bewegung, einmal ueber jede Scheibe
+    -- ausgedrueckt. Daraus folgen die Verhaeltnisse der Drehwinkel in pvv_kin.
+    local pol = {}
+    local function wegUeber(i, px, py, ex, ey)
+        local z = zustaende[i]
+        if z.type == "rot" then
+            local h = (py - z.cy) * ex - (px - z.cx) * ey
+            if math.abs(h) < 1e-9 then return nil end
+            return pvvLaenge(h) .. " * " .. scheibenVar(i)
+        end
+        local c = (z.vx * ex + z.vy * ey) / math.sqrt(z.vx^2 + z.vy^2)
+        if math.abs(c) < 1e-9 then return nil end
+        return "(" .. fN(c) .. ") * " .. scheibenVar(i)
+    end
+    for _, A in ipairs(scheibenNr) do
+        for _, B in ipairs(scheibenNr) do
+            local zA, zB = zustaende[A], zustaende[B]
+            local liste = A < B and pvvPolplan and pvvPolplan.poles[A] and pvvPolplan.poles[A][B]
+            if liste and liste[1] and bewegt(zA) and bewegt(zB) then
+                local p = liste[1]
+                local id = (A < 10 and B < 10) and (A .. B) or (A .. "_" .. B)
+                if p.type == "finite" then
+                    -- Komponente, in die sich der Nebenpol hauptsaechlich bewegt (y nach unten)
+                    local vx, vy
+                    if zA.type == "rot" then vx, vy = -zA.phi * (p.y - zA.cy), zA.phi * (p.x - zA.cx) else vx, vy = zA.vx, zA.vy end
+                    local inX = math.abs(vx) >= math.abs(vy)
+                    local ex, ey = inX and 1 or 0, inX and 0 or 1
+                    local a, bb = wegUeber(A, p.x, p.y, ex, ey), wegUeber(B, p.x, p.y, ex, ey)
+                    if a and bb then
+                        local name = (inX and "δx_P" or "δy_P") .. id
+                        pol[#pol + 1] = { name, a, bb }
+                        info[#info + 1] = name .. ": Nebenpol (" .. A .. "," .. B .. "), Verschiebung in " .. (inX and "x (nach rechts)" or "y (nach unten)")
+                            .. ", Spalte 2 ueber Scheibe " .. A .. ", Spalte 3 ueber Scheibe " .. B
+                    end
+                elseif zA.type == "rot" and zB.type == "rot" then
+                    local name = "φ_P" .. id
+                    pol[#pol + 1] = { name, scheibenVar(A), scheibenVar(B) }
+                    info[#info + 1] = name .. ": Nebenpol (" .. A .. "," .. B .. ") im Unendlichen, beide Scheiben drehen gleich"
+                elseif zA.type == "trans" and zB.type == "trans" then
+                    local a, bb = wegUeber(A, 0, 0, p.dx, p.dy), wegUeber(B, 0, 0, p.dx, p.dy)
+                    if a and bb then
+                        local name = "δ_P" .. id
+                        pol[#pol + 1] = { name, a, bb }
+                        info[#info + 1] = name .. ": Nebenpol (" .. A .. "," .. B .. ") im Unendlichen, gleiche Verschiebung in Polrichtung"
+                    end
+                end
+            end
+        end
+    end
+    table.insert(info, 1, "w_eq1: Kraft mal Weg (Weg positiv in Kraftrichtung), Momente mal Drehwinkel der Scheibe")
+    table.insert(info, 2, "pvv_kin: Weg | ueber die eigene Scheibe | ueber " .. ref_var .. "; darunter die Scheiben")
+    if #pol > 0 then table.insert(info, 3, "pvv_pol: Nebenpol | ueber die erste Scheibe | ueber die zweite (beide gleich)") end
+
+    if nurTerme == "anzeige" then
+        -- Zeichnung und Menues: genau die Wege und Scheiben von pvv_kin, mit Zahlenwert und Text
+        local d = { ref_var = ref_var, ref_disk = ref_disk, wege = {}, reihe = {}, scheiben = {}, momente = momentListe }
+        for _, w in ipairs(wegReihe) do
+            if #w.kin1 > 0 then
+                w.dim = (w.name == "φ_G") and (ref_rot and 0 or -1) or (ref_rot and 1 or 0)
+                w.text = pvvAnzeigeWert(w.num, w.dim, ref_var)
+                w.kraftText = kraftText(w.kraft)
+                d.wege[w.name] = w; d.reihe[#d.reihe + 1] = w
+            end
+        end
+        for _, i in ipairs(scheibenNr) do
+            local z = zustaende[i]
+            if bewegt(z) and ref then
+                local num = z.type == "rot" and -z.phi / ref_betrag or math.sqrt(z.vx^2 + z.vy^2) / ref_betrag
+                local dim = z.type == "rot" and (ref_rot and 0 or -1) or (ref_rot and 1 or 0)
+                d.scheiben[i] = { var = scheibenVar(i), num = num, dim = dim, text = pvvAnzeigeWert(num, dim, ref_var) }
+            end
+        end
+        return d
+    end
     print("eq1_lhs: " .. eq1_lhs)
     print("eq2_lhs: " .. eq2_lhs)
-    
+    if nurTerme then return eq1_lhs, eq2_lhs, kin, pol, info end
+
     if math.eval then
         local cas_wrap = zahlenFormat == 3 and "approx" or "exact"
+        local function matrixText(zeilen)
+            local r = {}
+            for _, z in ipairs(zeilen) do r[#r + 1] = table.concat(z, ",") end
+            return "[" .. table.concat(r, ";") .. "]"
+        end
         local success1 = pcall(function() math.eval("w_eq1 := " .. cas_wrap .. "(expand(" .. eq1_lhs .. ")) = 0") end)
         local success2 = pcall(function() math.eval("w_eq2 := " .. cas_wrap .. "(expand(" .. eq2_lhs .. ")) = 0") end)
+        pcall(math.eval, "DelVar pvv_kin, pvv_pol, pvvinfo")
+        if #kin > 0 then pcall(math.eval, "pvv_kin := " .. cas_wrap .. "(" .. matrixText(kin) .. ")") end
+        if #pol > 0 then pcall(math.eval, "pvv_pol := " .. cas_wrap .. "(" .. matrixText(pol) .. ")") end
+        local quoted = {}
+        for j, t in ipairs(info) do quoted[j] = '"' .. t:gsub('"', "'") .. '"' end
+        pcall(math.eval, "pvvinfo := [" .. table.concat(quoted, ";") .. "]")
         if success1 and success2 then
-            zeigeMeldung("Arbeitssatz exportiert: w_eq1 und w_eq2.", "Export")
+            zeigeMeldung("Arbeitssatz exportiert: w_eq1, w_eq2, pvv_kin" .. (#pol > 0 and ", pvv_pol" or "") .. ", pvvinfo.", "Export")
             print("-> Arbeitssatz als exakte CAS-Gleichung (w_eq1, w_eq2) exportiert!")
         else
             zeigeMeldung("Fehler beim Export des Arbeitssatzes.", "Export fehlgeschlagen")
@@ -2645,7 +3541,6 @@ exportArbeitssatzToTI = function()
         zeigeMeldung("Dieser Export erfordert das CAS.", "Export fehlgeschlagen")
     end
 end
-
 
 local function matMult(A, B)
     local C = {}; for i = 1, #A do C[i] = {}; for j = 1, #B[1] do local sum = 0; for k = 1, #A[1] do sum = sum + A[i][k] * B[k][j] end; C[i][j] = sum end end; return C
@@ -2709,8 +3604,14 @@ local function updateAlleLasten()
         local pure_q_cas = s.q_str and string.hasx(s.q_str)
         local pure_n_cas = s.n_str and string.hasx(s.n_str)
         local pure_m_cas = s.m_str and string.hasx(s.m_str)
-        
-        if L > 0 and math.eval and (has_q or has_n or has_m or has_gx or has_gy or pure_q_cas or pure_n_cas or pure_m_cas) then
+
+        -- Bogen: x ist der Winkel ab Stabanfang; Stuetzwerte fuer die Lastzeichnung und Resultierende je
+        -- Lastart fuer E-Seite und Teilsystem-Hover (die Rechnung verteilt die Lasten in injectVirtualArcs)
+        local bogen = bogenGeometrie(s)
+        s.bogen_res = bogen and bogenHatLast(s) and bogenLastResultierende(s) or nil
+        if bogen then
+            bogenLastPunkte(s, bogen)
+        elseif L > 0 and math.eval and (has_q or has_n or has_m or has_gx or has_gy or pure_q_cas or pure_n_cas or pure_m_cas) then
             local vars_to_del = {}
             
             if has_q then
@@ -2749,8 +3650,8 @@ local function updateAlleLasten()
             if pure_q_cas then math.eval("q_pure(x) := " .. s.q_str); table.insert(vars_to_del, "q_pure") end
             if pure_n_cas then math.eval("n_pure(x) := " .. s.n_str); table.insert(vars_to_del, "n_pure") end
             if pure_m_cas then math.eval("m_pure(x) := " .. s.m_str); table.insert(vars_to_del, "m_pure") end
-            if has_gx then math.eval("gx_temp(x) := " .. s.gx_str); table.insert(vars_to_del, "gx_temp") end
-            if has_gy then math.eval("gy_temp(x) := " .. s.gy_str); table.insert(vars_to_del, "gy_temp") end
+            if has_gx then math.eval("gx_temp(x) := " .. (globaleLinienlast(s, "gx"))); table.insert(vars_to_del, "gx_temp") end
+            if has_gy then math.eval("gy_temp(x) := " .. (globaleLinienlast(s, "gy"))); table.insert(vars_to_del, "gy_temp") end
             
             for j = 0, ptsBiegelinie do
                 local x_val = (j / ptsBiegelinie) * L; local x_str = fN(x_val)
@@ -3072,8 +3973,9 @@ local function getFesteinspannkraefte(stab, L, ignoreCondensation)
     local eq_n = getEqN(stab, L, fN, L_s)
     local eq_q_num = casWithDummySymbols(eq_q)
     local eq_n_num = casWithDummySymbols(eq_n)
-    local use_q_cas = (stab.q_str and string.hasx(stab.q_str))
-    local use_n_cas = (stab.n_str and string.hasx(stab.n_str))
+    local global_cas = string.hasx(stab.gx_str or "") or string.hasx(stab.gy_str or "")
+    local use_q_cas = (stab.q_str and string.hasx(stab.q_str)) or global_cas
+    local use_n_cas = (stab.n_str and string.hasx(stab.n_str)) or global_cas
     local use_m_cas = (stab.m_str and string.hasx(stab.m_str))
     
     local eff_gx = (stab.gx or 0) * (stab.gx_proj and math.abs(s_val) or 1)
@@ -3175,7 +4077,8 @@ local function baueLastvektor()
     end
     for i, s in ipairs(staebe) do
         if not s.is_cut then
-            local id, p_global = stabID[i], berechneElementLastvektor(s)
+            -- Bogen: die Lasten tragen seine Teilstaebe (injectVirtualArcs), nicht die Sehne
+            local id, p_global = stabID[i], (not s.is_virtual_parent) and berechneElementLastvektor(s) or nil
             if p_global then for j = 1, 6 do if id[j] > 0 then F[id[j]] = F[id[j]] - p_global[j][1] end end end
             if s.gelenk_A and s.x_mA ~= 0 then if id[3] > 0 then F[id[3]] = F[id[3]] + s.x_mA end; if type(knoten[s.k1].eq_m)=="number" and knoten[s.k1].eq_m>0 then F[knoten[s.k1].eq_m] = F[knoten[s.k1].eq_m] - s.x_mA end end
             if s.gelenk_B and s.x_mB ~= 0 then if id[6] > 0 then F[id[6]] = F[id[6]] + s.x_mB end; if type(knoten[s.k2].eq_m)=="number" and knoten[s.k2].eq_m>0 then F[knoten[s.k2].eq_m] = F[knoten[s.k2].eq_m] - s.x_mB end end
@@ -3184,10 +4087,14 @@ local function baueLastvektor()
             local dx, dy = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y; local L = math.sqrt(dx^2+dy^2)
             if L > 0 then
                 local ux, uy = dx/L, dy/L
-                if knoten[s.k1].eq_x > 0 then F[knoten[s.k1].eq_x] = F[knoten[s.k1].eq_x] + s.x_nA * ux end
-                if knoten[s.k1].eq_y > 0 then F[knoten[s.k1].eq_y] = F[knoten[s.k1].eq_y] + s.x_nA * uy end
-                if knoten[s.k2].eq_x > 0 then F[knoten[s.k2].eq_x] = F[knoten[s.k2].eq_x] - s.x_nA * ux end
-                if knoten[s.k2].eq_y > 0 then F[knoten[s.k2].eq_y] = F[knoten[s.k2].eq_y] - s.x_nA * uy end
+                -- Kraftpaar N = X_i in Stabrichtung, je Knoten ins Lagersystem (xi, eta) projiziert
+                for _, kp in ipairs({{knoten[s.k1], 1}, {knoten[s.k2], -1}}) do
+                    local k, vz = kp[1], kp[2] * s.x_nA
+                    local b = math.rad(k.winkel or 0)
+                    local c, sn = math.cos(b), math.sin(b)
+                    if k.eq_x > 0 then F[k.eq_x] = F[k.eq_x] + vz * (ux * c - uy * sn) end
+                    if k.eq_y > 0 then F[k.eq_y] = F[k.eq_y] + vz * (ux * sn + uy * c) end
+                end
             end
         end
     end
@@ -3204,6 +4111,9 @@ local cached_factored_K = nil
 -- wie ohne starre Staebe. Die Stabkraefte starrer Staebe folgen aus K*u + C'*lambda = F.
 -- ============================================================================
 glob_zwang = nil   -- je Stab lokale Zusatz-Endkraefte aus den Zwangsbedingungen
+-- { unbestimmt = Anzahl ueberzaehliger Zwangsbedingungen, widerspruch = Temperatur in gegenseitig
+--   gehaltenen starren Staeben } fuer die Hinweise nach der Berechnung
+glob_zwang_info = nil
 
 local function starrTemperatur(s)
     local kT, eT = 0, 0
@@ -3274,34 +4184,65 @@ local function gaussLoesen(A, b)
 end
 
 -- Zwangsbedingungen eliminieren und reduziertes System faktorisieren
+-- Nachgiebigkeit eines starren Stabes mit EA = EI = 1 in seinen Zwangszeilen (wie der Grenzwert
+-- EA = EI = 1/eps im Rand-LGS): Laengszeile L, Drehzeile L, Querzeile L^3/3, Dreh/Quer L^2/2
+local function zwangsNachgiebigkeit(za, zb)
+    if za.stab ~= zb.stab then return 0 end
+    local k1, k2 = knoten[staebe[za.stab].k1], knoten[staebe[za.stab].k2]
+    local L = math.sqrt((k2.x - k1.x)^2 + (k2.y - k1.y)^2)
+    local function art(z) return (z.cl[1] ~= 0 and "n") or (z.cl[2] ~= 0 and "q") or "m" end
+    local a, b = art(za), art(zb)
+    if a == "n" or b == "n" then return (a == b) and L or 0 end
+    if a == "m" and b == "m" then return L end
+    if a == "q" and b == "q" then return L^3 / 3 end
+    return L^2 / 2
+end
+
 local function faktorisiereMitZwang(K, zeilen)
     local n = #K
     local R, kept, pivot, istPivot = {}, {}, {}, {}
+    -- alle nicht leeren Zeilen; h = Herkunft einer Stufenzeile als Kombination dieser Zeilen
+    local alle, nullvek, widerspruch = {}, {}, false
     for _, z in ipairs(zeilen) do
         if not z.leer then
+            alle[#alle + 1] = z
             local d, norm = {}, 0
             for j = 1, n do d[j] = z.c[j] or 0; norm = math.max(norm, math.abs(d[j])) end
             local g = z.g
+            local h = { [#alle] = 1 }
             -- bisherige Pivotspalten aus der Zeile entfernen
             for r = 1, #R do
                 local f = d[pivot[r]]
-                if f ~= 0 then for j = 1, n do d[j] = d[j] - f * R[r].d[j] end; g = g - f * R[r].g end
+                if f ~= 0 then
+                    for j = 1, n do d[j] = d[j] - f * R[r].d[j] end; g = g - f * R[r].g
+                    for k, v in pairs(R[r].h) do h[k] = (h[k] or 0) - f * v end
+                end
             end
             local p, best = nil, 0
             for j = 1, n do if not istPivot[j] and math.abs(d[j]) > best then p, best = j, math.abs(d[j]) end end
             if p and best > 1e-9 * math.max(norm, 1e-300) then
                 local inv = 1 / d[p]
                 for j = 1, n do d[j] = d[j] * inv end; g = g * inv
+                for k, v in pairs(h) do h[k] = v * inv end
                 -- Pivot aus den frueheren Zeilen entfernen (reduzierte Stufenform)
                 for r = 1, #R do
                     local f = R[r].d[p]
-                    if f ~= 0 then for j = 1, n do R[r].d[j] = R[r].d[j] - f * d[j] end; R[r].g = R[r].g - f * g end
+                    if f ~= 0 then
+                        for j = 1, n do R[r].d[j] = R[r].d[j] - f * d[j] end; R[r].g = R[r].g - f * g
+                        for k, v in pairs(h) do R[r].h[k] = (R[r].h[k] or 0) - f * v end
+                    end
                 end
-                R[#R + 1] = { d = d, g = g }; pivot[#R] = p; istPivot[p] = true
-                kept[#kept + 1] = z
+                R[#R + 1] = { d = d, g = g, h = h }; pivot[#R] = p; istPivot[p] = true
+                kept[#kept + 1] = z; z.alle_index = #alle
+            else
+                -- abhaengige Zeile: h ist eine Kombination der Zeilen mit sum h_k * C_k = 0 (Nullvektor
+                -- von C'); die Zwangskraefte sind in dieser Richtung durch das Gleichgewicht nicht bestimmt
+                nullvek[#nullvek + 1] = h
+                if math.abs(g) > 1e-9 * math.max(math.abs(z.g), 1e-12) and math.abs(g) > 1e-12 then widerspruch = true end
             end
         end
     end
+    glob_zwang_info = { unbestimmt = #nullvek, widerspruch = widerspruch }
     -- u = Tz*ur + u0: unabhaengige Freiheitsgrade durchnummerieren
     local idx, nr = {}, 0
     for j = 1, n do if not istPivot[j] then nr = nr + 1; idx[j] = nr end end
@@ -3336,7 +4277,8 @@ local function faktorisiereMitZwang(K, zeilen)
         fact = factorLGS(Kr)
         if not fact then return nil end
     end
-    return { zwang = true, fact = fact, Tz = Tz, u0 = u0, nr = nr, n = n, K = K, zeilen = kept }
+    return { zwang = true, fact = fact, Tz = Tz, u0 = u0, nr = nr, n = n, K = K, zeilen = kept,
+             alle = alle, nullvek = nullvek, info = glob_zwang_info }
 end
 
 -- Loesung mit Zwang; setzt glob_zwang (lokale Zusatz-Endkraefte je starrem Stab)
@@ -3387,9 +4329,53 @@ local function loeseMitZwang(zf, F)
         end
     end
     local lambda = (m > 0) and gaussLoesen(A, b) or {}
+    -- lambda ueber alle Zeilen; ueberzaehlige Zeilen starten mit 0
+    local alle, lam = zf.alle or zf.zeilen, {}
+    for k = 1, #alle do lam[k] = 0 end
+    for p = 1, m do lam[zf.zeilen[p].alle_index or p] = (lambda and lambda[p]) or 0 end
+    -- Starre Teile gegenseitig statisch unbestimmt: lambda + sum t_i mu_i erfuellt das Gleichgewicht
+    -- fuer jedes t. Gewaehlt wird die Aufteilung gleich steifer starrer Staebe (Grenzwert
+    -- EA = EI = 1/eps, eps -> 0, wie im Rand-LGS): minimale Ergaenzungsenergie 1/2 lambda' W lambda.
+    local mu = zf.nullvek or {}
+    if #mu > 0 then
+        local function W_mal(v)   -- W * v (W blockweise je Stab)
+            local out = {}
+            for a = 1, #alle do
+                local s_ = 0
+                for b_, vb in pairs(v) do if vb ~= 0 then s_ = s_ + zwangsNachgiebigkeit(alle[a], alle[b_]) * vb end end
+                out[a] = s_
+            end
+            return out
+        end
+        local function skalar(x, y) local s_ = 0; for k = 1, #alle do s_ = s_ + (x[k] or 0) * (y[k] or 0) end; return s_ end
+        local Wmu, Wlam = {}, W_mal(lam)
+        for i = 1, #mu do Wmu[i] = W_mal(mu[i]) end
+        -- Haengt das Ergebnis ueberhaupt von der Annahme "gleich steif" ab? Nur wenn lambda_p auf einer
+        -- Zeile, die ueber W mit einem Eigenspannungszustand gekoppelt ist, nicht null ist. Sonst ist
+        -- t = 0 fuer jede Steifigkeitsannahme (z. B. senkrechte Kraft in einer starren Platte zwischen
+        -- zwei Loslagern ohne senkrechte Last), und der Hinweis waere ueberfluessig.
+        local lmax, relevant = 0, false
+        for k = 1, #alle do lmax = math.max(lmax, math.abs(lam[k] or 0)) end
+        for i = 1, #mu do
+            for k = 1, #alle do
+                if (Wmu[i][k] or 0) ~= 0 and math.abs(lam[k] or 0) > 1e-9 * lmax then relevant = true end
+            end
+        end
+        if zf.info then zf.info.relevant = relevant end
+        local Ms, rhs = {}, {}
+        for i = 1, #mu do
+            Ms[i] = {}
+            for j = 1, #mu do Ms[i][j] = skalar(mu[i], Wmu[j]) end
+            rhs[i] = -skalar(mu[i], Wlam)
+        end
+        local t = gaussLoesen(Ms, rhs)
+        if t then
+            for i = 1, #mu do for k, v in pairs(mu[i]) do lam[k] = lam[k] + t[i] * v end end
+        end
+    end
     local kraefte = {}
-    for p = 1, m do
-        local z, l = zf.zeilen[p], (lambda and lambda[p]) or 0
+    for p = 1, #alle do
+        local z, l = alle[p], lam[p] or 0
         local f = kraefte[z.stab] or {0, 0, 0, 0, 0, 0}
         for k = 1, 6 do f[k] = f[k] + z.cl[k] * l end
         kraefte[z.stab] = f
@@ -3467,7 +4453,7 @@ berechneSystemGleichungen = function(checkKinematicsOnly, useCache)
         for _, z in ipairs(zeilen) do if not z.leer then hatZwang = true end end
     end
     local fact
-    if hatZwang then fact = faktorisiereMitZwang(K, zeilen) else fact = factorLGS(K) end
+    if hatZwang then fact = faktorisiereMitZwang(K, zeilen) else glob_zwang_info = nil; fact = factorLGS(K) end
     if checkKinematicsOnly and not return_kinematic_mode then return fact ~= nil, stabID end
     
     if not checkKinematicsOnly and not return_kinematic_mode then cached_factored_K = fact end
@@ -3700,74 +4686,56 @@ local function findeAutoHauptsystem()
     end
 end
 
+-- Boegen fuer die Rechnung in gerade Teilstaebe zerlegen (Geometrie: bogenGeometrie). Die Teilstaebe
+-- erben Steifigkeit, Gelenke an den Enden, Temperatur und die Lasten des Bogens (bogenTeilLasten): q quer
+-- (radial), n laengs (tangential), Trapez linear ueber die Bogenlaenge, gx/gy global, m. Der Bogen selbst
+-- bekommt keinen Lastvektor mehr (baueLastvektor), sonst zaehlte die Last doppelt bzw. auf der Sehne.
 local function injectVirtualArcs()
     local orig_num_staebe = #staebe
     for i=1, orig_num_staebe do
         local s = staebe[i]
-        local k1 = knoten[s.k1]
-        local k2 = knoten[s.k2]
-        local dx, dy = k2.x - k1.x, k2.y - k1.y
-        local L_true = math.sqrt(dx^2 + dy^2)
-        if (s.bogen_r or 0) ~= 0 and math.abs(s.bogen_r) >= L_true/2 and L_true > 0 then
+        local g = bogenGeometrie(s)
+        s.bogen_last_fehler = nil
+        if g then
             s.is_virtual_parent = true
             s.virt_start_stab = #staebe + 1
-            local R = math.abs(s.bogen_r)
-            local sgn = s.bogen_r > 0 and -1 or 1
-            local d = math.sqrt(R^2 - (L_true/2)^2)
-            local segments = bogenSegmente
-            local prev_node_idx = s.k1
-            for j=1, segments-1 do
-                local t = j/segments
-                local nx, ny
-                if j == 1 then
-                    local slope = sgn * (L_true/2) / d
-                    local tx = dx/L_true - slope * (dy/L_true)
-                    local ty = dy/L_true + slope * (dx/L_true)
-                    local len = math.sqrt(tx^2 + ty^2)
-                    local L_arc = R * 2 * math.asin(L_true / (2*R))
-                    local seg_len = L_arc / segments
-                    nx = k1.x + (seg_len) * (tx/len)
-                    ny = k1.y + (seg_len) * (ty/len)
-                elseif j == segments - 1 then
-                    local slope = -sgn * (L_true/2) / d
-                    local tx = dx/L_true - slope * (dy/L_true)
-                    local ty = dy/L_true + slope * (dx/L_true)
-                    local len = math.sqrt(tx^2 + ty^2)
-                    local L_arc = R * 2 * math.asin(L_true / (2*R))
-                    local seg_len = L_arc / segments
-                    nx = k2.x - (seg_len) * (tx/len)
-                    ny = k2.y - (seg_len) * (ty/len)
-                else
-                    local x_local = (t - 0.5) * L_true
-                    local y_local = sgn * (math.sqrt(R^2 - x_local^2) - d)
-                    nx = k1.x + t * dx - y_local * (dy/L_true)
-                    ny = k1.y + t * dy + y_local * (dx/L_true)
-                end
-                table.insert(knoten, {x = nx, y = ny, gelenk=false, is_virtual = true, 
-                                      lager_x = false, lager_y = false, lager_m = false, 
+            s.virt_anzahl = g.n
+            s.bogen_alpha = g.alpha
+            local w = bogenLastWerte(s, g)
+            local teile = bogenTeilLasten(s, g, w)
+            for _, feld in ipairs({ "q", "n", "m", "gx", "gy" }) do
+                if w.fehler[feld] then s.bogen_last_fehler = s.bogen_last_fehler or {}; table.insert(s.bogen_last_fehler, feld) end
+            end
+            local idx = { [0] = s.k1, [g.n] = s.k2 }
+            for j = 1, g.n - 1 do
+                table.insert(knoten, {x = g.pts[j].x, y = g.pts[j].y, gelenk=false, is_virtual = true,
+                                      lager_x = false, lager_y = false, lager_m = false,
                                       last_x=0, last_y=0, last_m=0, last_w=0,
                                       cx=0, cy=0, cm=0, f_winkel=0})
-                local new_node_idx = #knoten
-                local v_stab = erstelleStab(prev_node_idx, new_node_idx)
+                idx[j] = #knoten
+            end
+            for j = 1, g.n do
+                local v_stab = erstelleStab(idx[j - 1], idx[j])
                 v_stab.EA = s.EA; v_stab.EI = s.EI; v_stab.EA_str = s.EA_str; v_stab.EI_str = s.EI_str
                 v_stab.biegesteif, v_stab.dehnsteif, v_stab.EA_manuell = s.biegesteif, s.dehnsteif, s.EA_manuell
                 v_stab.is_virtual = true; v_stab.parent_idx = i
-                if j == 1 then 
-                    v_stab.gelenk_A = s.gelenk_A 
+                v_stab.bogen_phi1, v_stab.bogen_phi2 = g.pts[j - 1].phi, g.pts[j].phi
+                local t = teile[j]
+                v_stab.q_A, v_stab.q_B, v_stab.n_A, v_stab.n_B, v_stab.m = t.qa, t.qb, t.na, t.nb, t.m
+                v_stab.To, v_stab.Tu, v_stab.alpha, v_stab.h = s.To or 0, s.Tu or 0, s.alpha, s.h
+                v_stab.To_str, v_stab.Tu_str, v_stab.alpha_str, v_stab.h_str = s.To_str, s.Tu_str, s.alpha_str, s.h_str
+                if j == 1 then
+                    v_stab.gelenk_A = s.gelenk_A
                     v_stab.n_gelenk_A = s.n_gelenk_A
                     v_stab.q_gelenk_A = s.q_gelenk_A
                 end
+                if j == g.n then
+                    v_stab.gelenk_B = s.gelenk_B
+                    v_stab.n_gelenk_B = s.n_gelenk_B
+                    v_stab.q_gelenk_B = s.q_gelenk_B
+                end
                 table.insert(staebe, v_stab)
-                prev_node_idx = new_node_idx
             end
-            local v_stab_last = erstelleStab(prev_node_idx, s.k2)
-            v_stab_last.EA = s.EA; v_stab_last.EI = s.EI; v_stab_last.EA_str = s.EA_str; v_stab_last.EI_str = s.EI_str
-            v_stab_last.biegesteif, v_stab_last.dehnsteif, v_stab_last.EA_manuell = s.biegesteif, s.dehnsteif, s.EA_manuell
-            v_stab_last.is_virtual = true; v_stab_last.parent_idx = i
-            v_stab_last.gelenk_B = s.gelenk_B
-            v_stab_last.n_gelenk_B = s.n_gelenk_B
-            v_stab_last.q_gelenk_B = s.q_gelenk_B
-            table.insert(staebe, v_stab_last)
         end
     end
 end
@@ -3775,8 +4743,9 @@ end
 local function cleanupVirtualArcs()
     for i, s in ipairs(staebe) do
         if s.is_virtual_parent then
+            local anzahl = s.virt_anzahl or bogenSegmente
             local virt1 = staebe[s.virt_start_stab]
-            local virt_last = staebe[s.virt_start_stab + (bogenSegmente - 1)]
+            local virt_last = staebe[s.virt_start_stab + (anzahl - 1)]
             if virt1 and virt1.s_local then
                 s.arc_N_A = -virt1.s_local[1]
                 s.arc_V_A = -virt1.s_local[2]
@@ -3796,8 +4765,10 @@ local function cleanupVirtualArcs()
                 s.v_local = {0,0,0,0,0,0}
             end
             
+            -- je Teilstueck Werte am Anfang (N, Q, M1) und am Ende (N2, Q2, M2): mit Last auf dem Bogen
+            -- aendern sich N und Q auch innerhalb eines Teilstuecks; phi1/phi2 = Winkel ab Stabanfang (rad)
             s.arc_plot_data = {}
-            for v = 0, bogenSegmente - 1 do
+            for v = 0, anzahl - 1 do
                 local virt = staebe[s.virt_start_stab + v]
                 if virt and virt.s_local then
                     local k1 = knoten[virt.k1]
@@ -3814,13 +4785,17 @@ local function cleanupVirtualArcs()
                         N = -virt.s_local[1],
                         Q = -virt.s_local[2],
                         M1 = -virt.s_local[3],
+                        N2 = virt.s_local[4],
+                        Q2 = virt.s_local[5],
                         M2 = virt.s_local[6],
+                        phi1 = virt.bogen_phi1, phi2 = virt.bogen_phi2,
                     })
                 end
             end
             
             s.is_virtual_parent = nil
             s.virt_start_stab = nil
+            s.virt_anzahl = nil
         end
     end
     for i = #staebe, 1, -1 do
@@ -4243,7 +5218,7 @@ end
 -- damit Zeichnen oder erneutes Rechnen ohne Aenderung den Abdruck nicht veraendert.
 local KNOTEN_EINGABEN = { "x", "y", "x_str", "y_str", "gelenk", "lager_x", "lager_y", "lager_m", "winkel",
     "cx", "cy", "cm", "cx_str", "cy_str", "cm_str", "f_winkel",
-    "last_x", "last_y", "last_m", "last_w", "last_x_str", "last_y_str", "last_m_str" }
+    "last_x", "last_y", "last_m", "last_w", "last_x_str", "last_y_str", "last_m_str", "last_w_str" }
 local STAB_EINGABEN = { "k1", "k2", "EA", "EI", "EA_str", "EI_str", "biegesteif", "dehnsteif", "EA_manuell",
     "bogen_r", "bogen_r_str", "q", "q_str", "n", "n_str", "m", "m_str", "q_A", "q_B", "n_A", "n_B",
     "q_A_str", "q_B_str", "n_A_str", "n_B_str", "gx", "gy", "gx_str", "gy_str", "gx_proj", "gy_proj",
@@ -4266,6 +5241,157 @@ local function systemFingerabdruck()
     return table.concat(teile, ";")
 end
 
+-- Schluessel des Rand-LGS-Speichers (randErgebnis): der Fingerabdruck aller Eingaben (mit Knoten- und
+-- Stabnummern) und alles, was das Rand-LGS sonst beeinflusst. Gleicher Schluessel = gleiches System,
+-- auch wenn es zwischendurch geloescht und identisch neu gezeichnet oder geoeffnet wurde.
+function randLGSCacheSchluessel()
+    return table.concat({ systemFingerabdruck(), tostring(randStarrDirekt),
+        tostring(symbolischer_modus), tostring(symbLSym), tostring(symbLDummy), tostring(KGV_Zustand),
+        tostring(zahlenFormat), tostring(casToleranz) }, "#")
+end
+
+-- =====================================================================
+-- SYSTEME SPEICHERN UND OEFFNEN (Obermenue Seite 4)
+-- Alle Eingaben (Knoten, Staebe, Einstellungen) als ein String in der TI-Variable system<Nr>:
+--   "TWS1;G:feld=wert,...;K:feld=wert,...;S:feld=wert,..."
+-- Werte: #Zahl, 'Text (% ; , = : " und Zeilenumbruch als %XX), T/F (Wahrheitswert), ~ (nil).
+-- Knoten und Staebe enthalten nur Felder, die vom Standard eines neuen Knotens bzw. Stabes abweichen;
+-- beim Oeffnen werden deshalb zuerst die Einstellungen (defEA, defEI ...) gesetzt.
+-- =====================================================================
+SYSTEM_GLOBALE = { "rasterMass", "rasterMass_str", "defEA", "defEA_str", "defEI", "defEI_str",
+    "randDehnstarr", "randStarrDirekt", "fachwerkModus", "pxProMeter", "offsetX", "offsetY" }
+
+function systemWertText(v)
+    if v == nil then return "~" end
+    if type(v) == "boolean" then return v and "T" or "F" end
+    if type(v) == "number" then
+        local t = string.format("%.15g", v)
+        if tonumber(t) ~= v then t = string.format("%.17g", v) end
+        return "#" .. t
+    end
+    return "'" .. (tostring(v):gsub("[%%;,=:\"\n]", function(c) return string.format("%%%02X", c:byte()) end))
+end
+
+function systemTextWert(t)
+    local c = t:sub(1, 1)
+    if t == "T" then return true elseif t == "F" then return false end
+    if c == "#" then return tonumber(t:sub(2)) end
+    if c == "'" then return (t:sub(2):gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)) end
+    return nil
+end
+
+-- aktuelles System als Text; Rueckgabe Text, Anzahl Knoten, Anzahl Staebe
+function systemAlsText()
+    local function felder(obj, namen, standard)
+        local p = {}
+        for _, n in ipairs(namen) do
+            if obj[n] ~= standard[n] then p[#p + 1] = n .. "=" .. systemWertText(obj[n]) end
+        end
+        return table.concat(p, ",")
+    end
+    local g = {}
+    for _, n in ipairs(SYSTEM_GLOBALE) do g[#g + 1] = n .. "=" .. systemWertText(_G[n]) end
+    local teile = { "TWS1", "G:" .. table.concat(g, ",") }
+    -- virtuelle Knoten und Staebe (Bogensegmente) gibt es nur waehrend der Rechnung
+    local neu, nK, nS = {}, 0, 0
+    local kStd = erstelleKnoten(0, 0)
+    for i, k in ipairs(knoten) do
+        if not k.is_virtual then
+            nK = nK + 1; neu[i] = nK
+            teile[#teile + 1] = "K:" .. felder(k, KNOTEN_EINGABEN, kStd)
+        end
+    end
+    local sStd = erstelleStab(0, 0)
+    for _, st in ipairs(staebe) do
+        if not st.is_virtual and neu[st.k1] and neu[st.k2] then
+            local kopie = {}
+            for _, n in ipairs(STAB_EINGABEN) do kopie[n] = st[n] end
+            kopie.k1, kopie.k2 = neu[st.k1], neu[st.k2]
+            nS = nS + 1
+            teile[#teile + 1] = "S:" .. felder(kopie, STAB_EINGABEN, sStd)
+        end
+    end
+    return table.concat(teile, ";"), nK, nS
+end
+
+-- Text -> { G = {{name, wert}...}, K = {...}, S = {...} }; nil und Fehlertext, wenn es kein System ist
+function systemAusText(text)
+    if type(text) ~= "string" or text:sub(1, 5) ~= "TWS1;" then return nil, "keine gespeicherte Tragwerksdatei" end
+    local daten = { G = {}, K = {}, S = {} }
+    for teil in (text:sub(6) .. ";"):gmatch("(.-);") do
+        local typ, rest = teil:match("^(%a):(.*)$")
+        if typ then
+            local felder = {}
+            for paar in (rest .. ","):gmatch("(.-),") do
+                local n, w = paar:match("^([%w_]+)=(.*)$")
+                if n then felder[#felder + 1] = { n, systemTextWert(w) } end
+            end
+            if typ == "G" then daten.G = felder
+            elseif typ == "K" then daten.K[#daten.K + 1] = felder
+            elseif typ == "S" then daten.S[#daten.S + 1] = felder end
+        end
+    end
+    return daten
+end
+
+function speichereSystem(nr)
+    local name = "system" .. tostring(nr)
+    if #knoten == 0 then zeigeMeldung("Kein System vorhanden.", "System speichern"); return false end
+    if not (var and var.store) then zeigeMeldung("Speichern nicht moeglich.", "System speichern"); return false end
+    local text, nK, nS = systemAlsText()
+    local ok, res = pcall(var.store, name, text)
+    if ok and var.recall then
+        local ok2, zurueck = pcall(var.recall, name)
+        ok = ok2 and zurueck == text
+    elseif ok then
+        ok = (res == nil)
+    end
+    if not ok then zeigeMeldung(name .. " konnte nicht gespeichert werden.", "System speichern"); return false end
+    letzteSystemNr = nr
+    zeigeMeldung("System als " .. name .. " gespeichert: " .. nK .. " Knoten, " .. nS .. " Staebe.", "System speichern")
+    return true
+end
+
+function oeffneSystem(nr)
+    local name = "system" .. tostring(nr)
+    local text
+    if var and var.recall then
+        local ok, v = pcall(var.recall, name)
+        if ok then text = v end
+    end
+    if text == nil then zeigeMeldung(name .. " ist nicht vorhanden.", "System oeffnen"); return false end
+    local daten, fehler = systemAusText(text)
+    if not daten then zeigeMeldung(name .. ": " .. fehler, "System oeffnen"); return false end
+    local function erlaubt(liste)
+        local m = {}
+        for _, n in ipairs(liste) do m[n] = true end
+        return m
+    end
+    local okG, okK, okS = erlaubt(SYSTEM_GLOBALE), erlaubt(KNOTEN_EINGABEN), erlaubt(STAB_EINGABEN)
+    loescheAlles()
+    -- zuerst die Einstellungen: der Standard neuer Staebe (EA, EI) haengt davon ab
+    for _, f in ipairs(daten.G) do if okG[f[1]] then _G[f[1]] = f[2] end end
+    local neuK, neuS = {}, {}
+    for _, felder in ipairs(daten.K) do
+        local k = erstelleKnoten(0, 0)
+        for _, f in ipairs(felder) do if okK[f[1]] then k[f[1]] = f[2] end end
+        if type(k.x) == "number" and type(k.y) == "number" then neuK[#neuK + 1] = k end
+    end
+    for _, felder in ipairs(daten.S) do
+        local st = erstelleStab(0, 0)
+        for _, f in ipairs(felder) do if okS[f[1]] then st[f[1]] = f[2] end end
+        if neuK[st.k1] and neuK[st.k2] and st.k1 ~= st.k2 then neuS[#neuS + 1] = st end
+    end
+    knoten, staebe = neuK, neuS
+    auswahl = nil
+    letzteSystemNr = nr
+    updateAlleLasten()
+    systemBerechnet = false
+    zeigeMeldung(name .. " geoeffnet: " .. #neuK .. " Knoten, " .. #neuS .. " Staebe.", "System oeffnen")
+    platform.window:invalidate()
+    return true
+end
+
 local function sammleHinweise()
     local liste = {}
     local tempStaebe, ohneH = false, {}
@@ -4280,6 +5406,22 @@ local function sammleHinweise()
     if #ohneH > 0 then
         liste[#liste + 1] = "Stab " .. table.concat(ohneH, ", ") .. ": To und Tu verschieden, aber h = 0. Es wirkt nur die mittlere Erwaermung (To+Tu)/2, keine Kruemmung. Fuer die Kruemmung h eingeben."
     end
+    -- Bogen: Lastfunktion, die das CAS beim Winkel x nicht auswerten konnte (injectVirtualArcs)
+    for i, s in ipairs(staebe) do
+        if s.bogen_last_fehler then
+            local namen = { q = "q", n = "n", m = "m", gx = "p_X", gy = "p_Y" }
+            local felder = {}
+            for _, f in ipairs(s.bogen_last_fehler) do felder[#felder + 1] = namen[f] or f end
+            liste[#liste + 1] = "Stab " .. i .. " (Bogen): Lastfunktion " .. table.concat(felder, ", ") .. " nicht auswertbar (x = Winkel ab Stabanfang im Winkelmodus). Dort mit 0 gerechnet."
+        end
+    end
+    -- nur wenn die angenommene Aufteilung das Ergebnis auch beeinflusst (relevant, siehe loeseMitZwang)
+    if glob_zwang_info and glob_zwang_info.unbestimmt > 0 and glob_zwang_info.relevant ~= false and not warnungKinematisch then
+        liste[#liste + 1] = "Starre Staebe halten sich gegenseitig statisch unbestimmt: Das Gleichgewicht legt die Kraftaufteilung zwischen ihnen nicht fest. Gerechnet wird wie im Rand-LGS so, als waeren alle starren Staebe gleich steif (EA = EI)."
+    end
+    if glob_zwang_info and glob_zwang_info.widerspruch and not warnungKinematisch then
+        liste[#liste + 1] = "Temperatur in starren Staeben, die sich gegenseitig halten: Die behinderte Verformung erzeugt eine unendliche Zwangskraft. Verformungen gelten, die Kraefte in den starren Staeben nicht."
+    end
     if symbolischer_modus and tempStaebe then
         liste[#liste + 1] = "Temperatur symbolisch: Diagrammwerte ohne Temperaturanteil. Vollstaendig im Export (wneu, uneu, wv, uv)."
     end
@@ -4290,7 +5432,10 @@ local function sammleHinweise()
             if (not stabBiegesteif(s) and not neuIstZahlText(s.EI_str)) or (not stabDehnsteif(s) and not neuIstZahlText(s.EA_str)) then symbolisch = true end
         end
         for _, k in ipairs(knoten) do
-            for _, t in ipairs({ k.cx_str, k.cy_str, k.cm_str }) do
+            -- feste Schleife statt ipairs: ipairs bricht beim ersten leeren Feld (nil) ab
+            local felder = { k.cx_str, k.cy_str, k.cm_str }
+            for j = 1, 3 do
+                local t = felder[j]
                 if type(t) == "string" and t ~= "" and not neuIstZahlText(t) then symbolisch = true end
             end
         end
@@ -4304,20 +5449,55 @@ local function sammleHinweise()
                 if s.s_local then for j = 1, 6 do maxK = math.max(maxK, math.abs(s.s_local[j] or 0)) end end
             end
             local tol = 1e-9 * maxK
-            local eiListe, eaListe = {}, {}
+            -- Gemischt ist das Ergebnis nur, wenn auf beiden Seiten eine Steifigkeit wirklich mitwirkt.
+            -- Ein Stab ohne Biegung haengt nicht von seinem EI ab, einer ohne Normalkraft nicht von seinem
+            -- EA: Die Loesung erfuellt dann jedes EI bzw. EA. Das gilt fuer Zahlen wie fuer Symbole.
+            local eiListe, eaListe, symAktiv = {}, {}, false
             for i, s in ipairs(staebe) do
                 local sl = s.s_local
                 if sl and maxK > 0 and not s.is_cut and not s.is_virtual_parent then
                     local pendel = (s.gelenk_A or knoten[s.k1].gelenk) and (s.gelenk_B or knoten[s.k2].gelenk)
-                    local biegung = math.max(math.abs(sl[2] or 0), math.abs(sl[3] or 0), math.abs(sl[5] or 0), math.abs(sl[6] or 0))
-                    if not stabBiegesteif(s) and neuIstZahlText(s.EI_str) and not pendel and biegung > tol then
-                        eiListe[#eiListe + 1] = tostring(i)
+                    local biegung = not pendel and math.max(math.abs(sl[2] or 0), math.abs(sl[3] or 0), math.abs(sl[5] or 0), math.abs(sl[6] or 0)) > tol
+                    local normal = math.max(math.abs(sl[1] or 0), math.abs(sl[4] or 0)) > tol
+                    if not stabBiegesteif(s) and biegung then
+                        if neuIstZahlText(s.EI_str) then eiListe[#eiListe + 1] = tostring(i) else symAktiv = true end
                     end
-                    if not stabDehnsteif(s) and neuIstZahlText(s.EA_str) and math.max(math.abs(sl[1] or 0), math.abs(sl[4] or 0)) > tol then
-                        eaListe[#eaListe + 1] = tostring(i)
+                    if not stabDehnsteif(s) and normal then
+                        if neuIstZahlText(s.EA_str) then eaListe[#eaListe + 1] = tostring(i) else symAktiv = true end
                     end
                 end
             end
+            -- symbolische Federn wirken, sobald sich ihr Knoten bewegt; EI/EA als Symbol in einem
+            -- Lasttext zaehlt immer
+            local maxU = 0
+            for _, k in ipairs(knoten) do
+                if k.mat_pv then for j = 1, 3 do maxU = math.max(maxU, math.abs(k.mat_pv[j][2] or 0)) end end
+            end
+            for _, k in ipairs(knoten) do
+                local bewegt = false
+                if k.mat_pv then for j = 1, 3 do if math.abs(k.mat_pv[j][2] or 0) > 1e-9 * maxU then bewegt = true end end end
+                local felder = { k.cx_str, k.cy_str, k.cm_str }
+                for j = 1, 3 do
+                    local t = felder[j]
+                    if bewegt and type(t) == "string" and t ~= "" and not neuIstZahlText(t) then symAktiv = true end
+                end
+            end
+            -- (nur Lasttexte: sym_vars enthaelt auch die Symbole der Steifigkeitsfelder selbst)
+            local function nenntEIEA(t)
+                if type(t) ~= "string" then return false end
+                for w in t:gmatch("%a[%w_]*") do local l = w:lower(); if l == "ei" or l == "ea" then return true end end
+                return false
+            end
+            for _, k in ipairs(knoten) do
+                if nenntEIEA(k.last_x_str) or nenntEIEA(k.last_y_str) or nenntEIEA(k.last_m_str) then symAktiv = true end
+            end
+            for _, s in ipairs(staebe) do
+                local felder = { s.q_str, s.q_A_str, s.q_B_str, s.n_str, s.n_A_str, s.n_B_str, s.m_str, s.gx_str, s.gy_str, s.To_str, s.Tu_str }
+                for j = 1, 11 do
+                    if nenntEIEA(felder[j]) then symAktiv = true end
+                end
+            end
+            if not symAktiv then eiListe, eaListe = {}, {} end
             -- Folge der Mischung: bei statisch bestimmten Systemen nur die Verformung, sonst auch die Kraefte
             local folge
             if getTopologicalN() ~= 0 then
@@ -4343,7 +5523,7 @@ local function clearOldCASVars()
     if not math.eval then return end
     local vars = {}
     for i = 1, 30 do
-        table.insert(vars, "N_bogen"..i); table.insert(vars, "q_bogen"..i)
+        table.insert(vars, "N_bogen"..i); table.insert(vars, "q_bogen"..i); table.insert(vars, "M_bogen"..i)
         table.insert(vars, "N_stab"..i); table.insert(vars, "Q_stab"..i); table.insert(vars, "M_stab"..i)
         table.insert(vars, "w_stab"..i); table.insert(vars, "u_stab"..i)
         table.insert(vars, "x_stab"..i); table.insert(vars, "y_stab"..i)
@@ -4351,6 +5531,56 @@ local function clearOldCASVars()
     end
     table.insert(vars, "sys_k"); table.insert(vars, "sys_f"); table.insert(vars, "sys_u")
     math.eval("DelVar " .. table.concat(vars, ", "))
+end
+
+-- Alle Variablen, die das Skript im Dokument anlegt (Exporte und Hilfsvariablen), loeschen:
+-- Obermenue Seite 4, Zeile 7, zweimal Enter. Gespeicherte Systeme (system<Nr>) und eigene Variablen
+-- bleiben, geloescht wird nur, was zu den Namen unten passt (# steht fuer eine Nummer).
+SKRIPT_VARIABLEN = { "randbed", "randinfo", "rleps", "sys_k", "sys_f", "sys_u", "kgv_delta", "kgv_delta0",
+    "w_eq1", "w_eq2", "pvv_kin", "pvv_pol", "pvvinfo", "ggw_a", "ggw_b", "ggw_x", "ggw_eqs", "lgs",
+    "q_temp", "q_cas_q", "q_cas_m", "q_cas_vk_ei", "n_temp", "n_cas_n", "n_cas_uk_ea", "m_temp", "m_cas_m",
+    "m_cas_vk_ei", "q_pure", "n_pure", "m_pure", "gx_temp", "gy_temp",
+    "wneu#", "uneu#", "wv#", "uv#", "v_ei_stab#", "u_ea_stab#", "n_stab#", "q_stab#", "m_stab#", "w_stab#",
+    "u_stab#", "x_stab#", "y_stab#", "m_bogen#", "n_bogen#", "q_bogen#", "stab#_k", "stab#_p", "stab#_v",
+    "knot#_pv", "ux_k#", "uy_k#", "phi_k#" }
+varLoeschFrage = false   -- erstes Enter in Zeile 7 fragt nach, das zweite loescht
+
+function istSkriptVariable(name)
+    local n = tostring(name):lower()
+    if n:match("^system%d+$") then return false end
+    for _, muster in ipairs(SKRIPT_VARIABLEN) do
+        if n:match("^" .. muster:gsub("#", "%%d+") .. "$") then return true end
+    end
+    return false
+end
+
+-- liefert die Zahl der Namen, fuer die DelVar ausgefuehrt wurde
+function loescheSkriptVariablen()
+    if not math.eval then return 0 end
+    local namen, gesehen = {}, {}
+    local function dazu(n)
+        n = tostring(n):lower()
+        if not gesehen[n] and istSkriptVariable(n) then gesehen[n] = true; namen[#namen + 1] = n end
+    end
+    -- alle Nummern bis zur Stab-/Knotenzahl (mindestens 30), dazu mit var.list auch Reste
+    -- groesserer Systeme (z. B. wneu45)
+    local nMax = math.max(30, #staebe, #knoten)
+    for _, muster in ipairs(SKRIPT_VARIABLEN) do
+        if muster:find("#", 1, true) then
+            for i = 1, nMax do dazu((muster:gsub("#", tostring(i)))) end
+        else dazu(muster) end
+    end
+    if var and var.list then
+        local ok, liste = pcall(var.list)
+        if ok and type(liste) == "table" then for _, n in ipairs(liste) do dazu(n) end end
+    end
+    for i = 1, #namen, 40 do   -- in Stuecken, eine einzige DelVar-Zeile wuerde sehr lang
+        local teil = {}
+        for j = i, math.min(i + 39, #namen) do teil[#teil + 1] = namen[j] end
+        pcall(math.eval, "DelVar " .. table.concat(teil, ","))
+    end
+    randErgebnis = nil   -- sonst meldete das Rand-LGS "aus dem Speicher", obwohl wneu usw. fehlen
+    return #namen
 end
 
 local function starteBerechnung()
@@ -4527,364 +5757,393 @@ function getHingeNumber(nodeIndex)
     return nodeIndex
 end
 
+-- Gelenkknoten fuer Explosionszeichnung (Seite 2) und LGS-Export: Staebe mit Gelenk (H) bzw.
+-- biegesteif (R) am Knoten, Zahl der Teilsysteme dort und erster Gelenkstab r1 (Stabreihenfolge)
+function gelenkKnoten(k_idx)
+    local k = knoten[k_idx]
+    local H, R = {}, {}
+    for j, s in ipairs(staebe) do
+        if not s.is_cut and (s.k1 == k_idx or s.k2 == k_idx) then
+            local g = k.gelenk
+                or (s.k1 == k_idx and (s.gelenk_A or s.n_gelenk_A or s.q_gelenk_A))
+                or (s.k2 == k_idx and (s.gelenk_B or s.n_gelenk_B or s.q_gelenk_B))
+            if g then H[#H + 1] = j else R[#R + 1] = j end
+        end
+    end
+    return { H = H, R = R, numTS = #H + ((#R > 0) and 1 or 0), r1 = H[1] }
+end
+
+-- Positive Richtung der Gelenkgroessen am Gelenkstab j (Seite 2 und LGS): der erste Gelenkstab r1
+-- traegt sie wie positive Schnittgroessen (Stabanfang -1: nach links/oben bzw. gegen Stabachse und
+-- -normale, Moment im Uhrzeigersinn; Stabende +1), alle anderen Seiten entgegengesetzt
+function gelenkRichtung(k_idx, j, info)
+    info = info or gelenkKnoten(k_idx)
+    local r1 = info.r1 or j
+    local e1 = (staebe[r1].k1 == k_idx) and -1 or 1
+    return (j == r1) and e1 or -e1
+end
+
+-- Stab, an dem Seite 2 die Lasten und Lager eines Knotens zeichnet: der erste Stab mit Gelenk am
+-- Knoten, sonst der erste Stab dort (alle biegesteif verbunden, also dasselbe Teilsystem)
+function lastStabKnoten(k_idx)
+    local erster
+    for j, s in ipairs(staebe) do
+        if not s.is_cut and (s.k1 == k_idx or s.k2 == k_idx) then
+            erster = erster or j
+            if knoten[k_idx].gelenk
+                or (s.k1 == k_idx and (s.gelenk_A or s.n_gelenk_A or s.q_gelenk_A))
+                or (s.k2 == k_idx and (s.gelenk_B or s.n_gelenk_B or s.q_gelenk_B)) then
+                return j
+            end
+        end
+    end
+    return erster
+end
+
+-- Gleichgewichts-LGS zur Explosionszeichnung, Seite 2: die Handrechnung zu genau den dort
+-- gezeichneten Kraeften (TM1: statisch bestimmte Systeme). Je Teilsystem Summe der Kraefte nach
+-- rechts, nach oben und Summe der Momente gegen den Uhrzeigersinn um den Bezugspunkt P.
+-- Unbekannte mit Namen und positiver Richtung wie auf Seite 2:
+--   Lager X (getSuppLetter): X_h in xi = (cos w, -sin w), X_v nach oben (-eta), M_X gegen den Uhrzeigersinn
+--   Momentengelenk n: Gx_n, Gy_n; N-/Q-Gelenk: Gn_n, Gq_n (Stabachse bzw. -normale), Gm_n;
+--     Richtung nach gelenkRichtung, auf der Gegenseite entgegengesetzt
+--   mehr als zwei Teilsysteme am Gelenk: je Gelenkstab eigene Groessen (Suffix s<Teilsystem>); ohne
+--     biegesteifen Rest zusaetzlich das Gleichgewicht des Gelenkbolzens
+-- Lasten und Lager eines Knotens gehoeren zum Teilsystem von lastStabKnoten (wie auf Seite 2).
+-- Symbolischer Modus: Lasten mit Namen, Laengen als Vielfache von l.
 function exportLGSMatrixToTI(only_build)
-    local eq_strings = {}
-    local x_labels = {}
-    local A = {}
-    local b = {}
-    
+    local sym = symbolischer_modus
+    local fN = fN_export
+    local eq_strings, x_labels, A, b = {}, {}, {}, {}
+    local unbekannte = {}
+
     local function addVar(name)
         table.insert(x_labels, {name})
+        unbekannte[#x_labels] = { name = name, eintraege = {} }
         return #x_labels
     end
-    
-    if fachwerkModus then
-        -- Fachwerk LGS
-        local vars_S = {}
-        for j = 1, #staebe do vars_S[j] = addVar("S_"..j) end
-        local vars_H = {}
-        local vars_V = {}
-        for i, k in ipairs(knoten) do
-            if k.lager_x then vars_H[i] = addVar(getSuppLetter(i).."_h") end
-            if k.lager_y then vars_V[i] = addVar(getSuppLetter(i).."_v") end
-        end
-        
-        for i, k in ipairs(knoten) do
-            local row_x = {}; local row_y = {}
-            for c = 1, #x_labels do row_x[c] = 0; row_y[c] = 0 end
-            
-            for j, s in ipairs(staebe) do
-                if s.k1 == i or s.k2 == i then
-                    local dx = knoten[s.k2].x - knoten[s.k1].x
-                    local dy = knoten[s.k2].y - knoten[s.k1].y
-                    local L = math.sqrt(dx*dx + dy*dy)
-                    if L > 0 then
-                        local sign = (s.k2 == i) and -1 or 1
-                        row_x[vars_S[j]] = formatLabel(sign * dx/L)
-                        row_y[vars_S[j]] = formatLabel(sign * dy/L)
-                    end
-                end
-            end
-            
-            if vars_H[i] then row_x[vars_H[i]] = 1 end
-            if vars_V[i] then row_y[vars_V[i]] = -1 end
-            
-            local b_x = -(k.last_x or 0)
-            local b_y = -(k.last_y or 0)
-            table.insert(b, {formatLabel(b_x)})
-            table.insert(b, {formatLabel(b_y)})
-            table.insert(A, row_x)
-            table.insert(A, row_y)
-            table.insert(eq_strings, {"→ K"..i})
-            table.insert(eq_strings, {"↑ K"..i})
-        end
-    else
-        -- Teilsystem LGS (nutzt globale Zuordnung)
-        if not glob_ts_scheibe or not glob_disk_centers then assignTeilsysteme() end
-        local ts_scheibe = glob_ts_scheibe
-        local num_disks = glob_num_disks
-        
-        local vars_H = {}; local vars_V = {}; local vars_M = {}
-        for i, k in ipairs(knoten) do
-            if k.lager_x then vars_H[i] = addVar(getSuppLetter(i).."_h") end
-            if k.lager_y then vars_V[i] = addVar(getSuppLetter(i).."_v") end
-            if k.lager_m then vars_M[i] = addVar("M_"..getSuppLetter(i)) end
-        end
-        
-        local hinge_vars = {}
-        for i, k in ipairs(knoten) do
-            local hasHinge = k.gelenk
-            local conn_rods = {}
-            if not hasHinge then
-                for j, s in ipairs(staebe) do
-                    if (s.k1 == i and (s.n_gelenk_A or s.q_gelenk_A or s.gelenk_A)) or
-                       (s.k2 == i and (s.n_gelenk_B or s.q_gelenk_B or s.gelenk_B)) then
-                        hasHinge = true
-                    end
-                    if s.k1 == i or s.k2 == i then table.insert(conn_rods, j) end
-                end
-            else
-                for j, s in ipairs(staebe) do
-                    if s.k1 == i or s.k2 == i then table.insert(conn_rods, j) end
-                end
-            end
-            
-            if hasHinge then
-                hinge_vars[i] = { rods = conn_rods }
-                
-                local ang_count, rigid_count = 0, 0
-                if k.gelenk then
-                    ang_count = #conn_rods
-                else
-                    for _, j in ipairs(conn_rods) do
-                        local s = staebe[j]
-                        if (s.k1 == i and (s.gelenk_A or s.n_gelenk_A or s.q_gelenk_A)) or
-                           (s.k2 == i and (s.gelenk_B or s.n_gelenk_B or s.q_gelenk_B)) then
-                            ang_count = ang_count + 1
-                        else
-                            rigid_count = rigid_count + 1
-                        end
-                    end
-                end
-                local numTS = ang_count + (rigid_count > 0 and 1 or 0)
-                
-                if numTS > 2 then
-                    hinge_vars[i].multi = true
-                    for _, j in ipairs(conn_rods) do
-                        hinge_vars[i][j] = {
-                            H = addVar("Gx_"..getHingeNumber(i).."s"..ts_scheibe[j]),
-                            V = addVar("Gy_"..getHingeNumber(i).."s"..ts_scheibe[j])
-                        }
-                    end
-                else
-                    hinge_vars[i].multi = false
-                    
-                    local r1, r2
-                    if k.gelenk then
-                        r1 = conn_rods[1]
-                        r2 = conn_rods[2]
-                    else
-                        for _, j in ipairs(conn_rods) do
-                            local s = staebe[j]
-                            if (s.k1 == i and (s.gelenk_A or s.n_gelenk_A or s.q_gelenk_A)) or
-                               (s.k2 == i and (s.gelenk_B or s.n_gelenk_B or s.q_gelenk_B)) then
-                                r1 = j
-                            else
-                                r2 = j
-                            end
-                        end
-                    end
-                    hinge_vars[i].r1 = r1
-                    hinge_vars[i].r2 = r2
-                    -- Welche Groessen uebertraegt die Verbindung? Nur die, die nicht geloest sind.
-                    -- Momentengelenk: N und Q, als globale Komponenten Gx, Gy (wie im E-Modus).
-                    -- N-/Q-Gelenk: die verbleibende Stabkraft laengs (Gn) bzw. quer (Gq) plus das
-                    -- Moment Gm -- genau die Groessen, die der E-Modus an diesen Enden beschriftet.
-                    local nr = getHingeNumber(i)
-                    local sb = r1 and staebe[r1] or nil
-                    local rel_n, rel_q = false, false
-                    local rel_m = k.gelenk and true or false
-                    if sb then
-                        if sb.k1 == i then
-                            rel_n = sb.n_gelenk_A and true or false
-                            rel_q = sb.q_gelenk_A and true or false
-                            rel_m = rel_m or (sb.gelenk_A and true or false)
-                        else
-                            rel_n = sb.n_gelenk_B and true or false
-                            rel_q = sb.q_gelenk_B and true or false
-                            rel_m = rel_m or (sb.gelenk_B and true or false)
-                        end
-                    end
-                    if rel_m and not rel_n and not rel_q then
-                        hinge_vars[i].single = { H = addVar("Gx_"..nr), V = addVar("Gy_"..nr) }
-                    else
-                        local einzeln = {}
-                        if not rel_n then einzeln.N = addVar("Gn_"..nr) end
-                        if not rel_q then einzeln.Q = addVar("Gq_"..nr) end
-                        if not rel_m then einzeln.M = addVar("Gm_"..nr) end
-                        hinge_vars[i].single = einzeln
-                    end
-                end
-            end
-        end
-        
-        local disk_centers = glob_disk_centers
-        
-        local rows_per_disk = {}
-        for d = 1, num_disks do
-            local rx = {}; local ry = {}; local rm = {}
-            for c = 1, #x_labels do rx[c]=0; ry[c]=0; rm[c]=0 end
-            rows_per_disk[d] = {rx=rx, ry=ry, rm=rm, bx=0, by=0, bm=0}
-        end
-        
-        local function addForceToDisk(d, x, y, H, V, M)
-            if not d or d < 1 or d > num_disks then return end
-            local row = rows_per_disk[d]
-            row.bx = row.bx - H
-            row.by = row.by - V
-            row.bm = row.bm - M
-            local cx, cy = disk_centers[d].x, disk_centers[d].y
-            row.bm = row.bm - ((x - cx) * V - (y - cy) * H)
-        end
 
-        -- Unbekannte Kraft var in Richtung (fx, fy) (Einheitsvektor) am Punkt (x, y)
-        local function addVarDirToDisk(d, x, y, var, fx, fy, sign)
-            if not d or d < 1 or d > num_disks or not var then return end
-            local row = rows_per_disk[d]
-            local cx, cy = disk_centers[d].x, disk_centers[d].y
-            row.rx[var] = row.rx[var] + sign * fx
-            row.ry[var] = row.ry[var] + sign * fy
-            row.rm[var] = row.rm[var] + sign * ((x - cx) * fy - (y - cy) * fx)
-        end
+    local function istNull(v) return v == nil or v == 0 or v == "0" end
+    local function txt(v) return type(v) == "number" and fN(v) or v end
+    local function laenge(d)
+        if math.abs(d) < 1e-12 then return 0 end
+        if not sym then return d end
+        return pvvLaenge(d)
+    end
+    local function mal(a, c)
+        if istNull(a) or istNull(c) then return 0 end
+        if type(a) == "number" and type(c) == "number" then return a * c end
+        if a == 1 then return c end
+        if c == 1 then return a end
+        return "(" .. txt(a) .. ")*(" .. txt(c) .. ")"
+    end
+    local function summe(a, c)
+        if istNull(a) then return c end
+        if istNull(c) then return a end
+        if type(a) == "number" and type(c) == "number" then return a + c end
+        return "(" .. txt(a) .. ")+(" .. txt(c) .. ")"
+    end
 
-        local function addVarForceToDisk(d, x, y, varH, varV, varM, sign)
-            if not d or d < 1 or d > num_disks then return end
-            local row = rows_per_disk[d]
-            if varH then
-                row.rx[varH] = row.rx[varH] + sign * 1
-                local cx, cy = disk_centers[d].x, disk_centers[d].y
-                row.rm[varH] = row.rm[varH] - sign * (y - cy)
-            end
-            if varV then
-                row.ry[varV] = row.ry[varV] + sign * 1
-                local cx, cy = disk_centers[d].x, disk_centers[d].y
-                row.rm[varV] = row.rm[varV] + sign * (x - cx)
-            end
-            if varM then
-                row.rm[varM] = row.rm[varM] + sign * 1
-            end
+    -- Zelle einer Matrix: Zahlanteil plus Textanteile (symbolisch)
+    local function zelle() return { n = 0, t = {} } end
+    local function dazu(z, v)
+        if istNull(v) then return end
+        if type(v) == "number" then z.n = z.n + v else z.t[#z.t + 1] = v end
+    end
+    local function zellText(z)
+        if not z then return "0" end
+        if #z.t == 0 then return fN(math.abs(z.n) < 1e-9 and 0 or z.n) end
+        local teile = {}
+        for _, t in ipairs(z.t) do teile[#teile + 1] = "(" .. t .. ")" end
+        if math.abs(z.n) > 1e-12 then teile[#teile + 1] = fN(z.n) end
+        local s = table.concat(teile, "+")
+        if math.eval then s = eval_cas_string(s) or s end
+        return s
+    end
+
+    local koerper = {}
+    local function neuerKoerper(px, py, mitMoment, namen)
+        local kp = { px = px, py = py, mitMoment = mitMoment, namen = namen, rx = {}, ry = {}, rm = {},
+                     bx = zelle(), by = zelle(), bm = zelle() }
+        koerper[#koerper + 1] = kp
+        return kp
+    end
+    local function zelleVon(tab, var) tab[var] = tab[var] or zelle(); return tab[var] end
+
+    -- unbekannte Kraft in Richtung (fx, fy) (y nach unten) bzw. Moment m (gegen den Uhrzeigersinn) am Punkt (x, y)
+    local function unbekannt(kp, var, x, y, fx, fy, m)
+        if not kp or not var then return end
+        fx, fy, m = fx or 0, fy or 0, m or 0
+        dazu(zelleVon(kp.rx, var), fx)
+        dazu(zelleVon(kp.ry, var), -fy)
+        if kp.mitMoment then
+            dazu(zelleVon(kp.rm, var), laenge((y - kp.py) * fx - (x - kp.px) * fy))
+            dazu(zelleVon(kp.rm, var), m)
         end
-        
-        for i, k in ipairs(knoten) do
-            local assigned_disk = nil
-            for j, s in ipairs(staebe) do
-                if s.k1 == i or s.k2 == i then assigned_disk = ts_scheibe[j]; break end
-            end
-            if assigned_disk then
-                if vars_H[i] then addVarForceToDisk(assigned_disk, k.x, k.y, vars_H[i], nil, nil, 1) end
-                if vars_V[i] then addVarForceToDisk(assigned_disk, k.x, k.y, nil, vars_V[i], nil, -1) end
-                if vars_M[i] then addVarForceToDisk(assigned_disk, k.x, k.y, nil, nil, vars_M[i], -1) end
-                addForceToDisk(assigned_disk, k.x, k.y, k.last_x or 0, k.last_y or 0, k.last_m or 0)
-            end
+        table.insert(unbekannte[var].eintraege, { koerper = kp, fx = fx, fy = fy, m = m, x = x, y = y })
+    end
+    -- bekannte Kraft F in Richtung (cx, cy) am Punkt (x, y) und bekanntes Moment M (gegen den Uhrzeigersinn)
+    local function bekannt(kp, x, y, F, cx, cy, M)
+        if not kp then return end
+        if not istNull(F) then
+            dazu(kp.bx, mal(F, -cx))
+            dazu(kp.by, mal(F, cy))
+            if kp.mitMoment then dazu(kp.bm, mal(F, mal(-1, laenge((y - kp.py) * cx - (x - kp.px) * cy)))) end
         end
-        
-        for j, s in ipairs(staebe) do
-            local d = ts_scheibe[j]
-            if d then
-                local k1, k2 = knoten[s.k1], knoten[s.k2]
-                local dx, dy = k2.x - k1.x, k2.y - k1.y
-                local L = math.sqrt(dx*dx + dy*dy)
-                if L > 1e-6 then
-                    local qA_v = s.q + (s.q_A or 0); local qB_v = s.q + (s.q_B or 0)
-                    local Rq = (qA_v + qB_v)/2 * L + (s.R_q_cas or 0)
-                    local Sq = (L^2)/6 * (qA_v + 2*qB_v) + (s.S_q_cas or 0)
-                    if math.abs(Rq) > 1e-6 then
-                        local xs = Sq/Rq
-                        local px = k1.x + dx * (xs/L); local py = k1.y + dy * (xs/L)
-                        local nx, ny = -dy/L, dx/L
-                        addForceToDisk(d, px, py, Rq*nx, Rq*ny, 0)
-                    end
-                    
-                    local nA_v = s.n + (s.n_A or 0); local nB_v = s.n + (s.n_B or 0)
-                    local Rn = (nA_v + nB_v)/2 * L + (s.R_n_cas or 0)
-                    local Sn = (s.S_n_cas or 0)
-                    if math.abs(Rn) > 1e-6 then
-                        local xs = Sn/Rn
-                        local px = k1.x + dx * (xs/L); local py = k1.y + dy * (xs/L)
-                        local ux, uy = dx/L, dy/L
-                        addForceToDisk(d, px, py, Rn*ux, Rn*uy, 0)
-                    end
-                    
-                    local gx_val = s.gx or 0
-                    local L_eff_gx = s.gx_proj and math.abs(dy) or L
-                    local Rgx = gx_val * L_eff_gx + (s.R_gx_cas or 0)
-                    local Sgx = Rgx * (L/2) + (s.S_gx_cas or 0)
-                    if math.abs(Rgx) > 1e-6 then
-                        local xs = Sgx/Rgx
-                        local px = k1.x + dx * (xs/L); local py = k1.y + dy * (xs/L)
-                        addForceToDisk(d, px, py, Rgx, 0, 0)
-                    end
-                    
-                    local gy_val = s.gy or 0
-                    local L_eff_gy = s.gy_proj and math.abs(dx) or L
-                    local Rgy = gy_val * L_eff_gy + (s.R_gy_cas or 0)
-                    local Sgy = Rgy * (L/2) + (s.S_gy_cas or 0)
-                    if math.abs(Rgy) > 1e-6 then
-                        local xs = Sgy/Rgy
-                        local px = k1.x + dx * (xs/L); local py = k1.y + dy * (xs/L)
-                        addForceToDisk(d, px, py, 0, Rgy, 0)
-                    end
-                    
-                    local Rm = (s.m or 0) * L + (s.R_m_cas or 0)
-                    if math.abs(Rm) > 1e-6 then
-                        addForceToDisk(d, (k1.x+k2.x)/2, (k1.y+k2.y)/2, 0, 0, Rm)
-                    end
-                end
-            end
+        if kp.mitMoment and not istNull(M) then dazu(kp.bm, mal(-1, M)) end
+    end
+    -- Streckenlast: Resultierende R in Richtung (cx, cy) und statisches Moment S um k1 entlang der Stabachse
+    -- (e_x, e_y): Moment um P = R*d0 + S*(e_y cx - e_x cy)
+    local function streckenlast(kp, k1, ex, ey, R, S, cx, cy)
+        if not kp then return end
+        if not istNull(R) then
+            dazu(kp.bx, mal(R, -cx))
+            dazu(kp.by, mal(R, cy))
+            if kp.mitMoment then dazu(kp.bm, mal(R, mal(-1, laenge((k1.y - kp.py) * cx - (k1.x - kp.px) * cy)))) end
         end
-        
-        local node_eqs = {}
-        for i, k in ipairs(knoten) do
-            if hinge_vars[i] then
-                local hv = hinge_vars[i]
-                if hv.multi then
-                    local n_rx = {}; local n_ry = {}
-                    for c = 1, #x_labels do n_rx[c]=0; n_ry[c]=0 end
-                    for _, j in ipairs(hv.rods) do
-                        local s = staebe[j]
-                        local h_sign = (s.k1 == i) and -1 or 1
-                        addVarForceToDisk(ts_scheibe[j], k.x, k.y, hv[j].H, hv[j].V, nil, h_sign)
-                        n_rx[hv[j].H] = -h_sign
-                        n_ry[hv[j].V] = -h_sign
-                    end
-                    table.insert(node_eqs, {rx=n_rx, ry=n_ry, bx=0, by=0, name="G"..i})
-                else
-                    local r1 = hv.r1
-                    local r2 = hv.r2
-                    if r1 and r2 then
-                        local sign1 = (staebe[r1].k1 == i) and -1 or 1
-                        local sign2 = (staebe[r2].k1 == i) and -1 or 1
-                        if sign1 == sign2 then sign2 = -sign1 end
-                        local sg = hv.single
-                        if sg.H or sg.V then
-                            addVarForceToDisk(ts_scheibe[r1], k.x, k.y, sg.H, sg.V, nil, sign1)
-                            addVarForceToDisk(ts_scheibe[r2], k.x, k.y, sg.H, sg.V, nil, sign2)
-                        end
-                        if sg.N or sg.Q or sg.M then
-                            -- lokale Richtungen des geloesten Stabes: t laengs, n quer
-                            local sb = staebe[r1]
-                            local ka, kb = knoten[sb.k1], knoten[sb.k2]
-                            local dx, dy = kb.x - ka.x, kb.y - ka.y
-                            local L = math.sqrt(dx*dx + dy*dy)
-                            if L > 1e-9 then
-                                local tx, ty = dx/L, dy/L
-                                local nx, ny = -dy/L, dx/L
-                                if sg.N then
-                                    addVarDirToDisk(ts_scheibe[r1], k.x, k.y, sg.N, tx, ty, sign1)
-                                    addVarDirToDisk(ts_scheibe[r2], k.x, k.y, sg.N, tx, ty, sign2)
-                                end
-                                if sg.Q then
-                                    addVarDirToDisk(ts_scheibe[r1], k.x, k.y, sg.Q, nx, ny, sign1)
-                                    addVarDirToDisk(ts_scheibe[r2], k.x, k.y, sg.Q, nx, ny, sign2)
-                                end
-                                if sg.M then
-                                    -- Vorzeichen so, dass Gm dem im E-Modus gezeigten Stabendmoment entspricht
-                                    addVarForceToDisk(ts_scheibe[r1], k.x, k.y, nil, nil, sg.M, -sign1)
-                                    addVarForceToDisk(ts_scheibe[r2], k.x, k.y, nil, nil, sg.M, -sign2)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
+        local c1 = ey * cx - ex * cy
+        if kp.mitMoment and not istNull(S) and math.abs(c1) > 1e-12 then dazu(kp.bm, mal(S, -c1)) end
+    end
+
+    -- Knotenlast global (y nach unten), wie in der Berechnung um -last_w gedreht; symbolisch mit Namen
+    local function knotenlast(k)
+        local function wert(z, t)
+            if math.abs(z or 0) < 1e-12 then return 0 end
+            if sym and type(t) == "string" and t ~= "" then return "(" .. t .. ")" end
+            return z
         end
-        
-        for d = 1, num_disks do
-            table.insert(A, rows_per_disk[d].rx)
-            table.insert(A, rows_per_disk[d].ry)
-            table.insert(A, rows_per_disk[d].rm)
-            table.insert(b, {rows_per_disk[d].bx})
-            table.insert(b, {rows_per_disk[d].by})
-            table.insert(b, {rows_per_disk[d].bm})
-            table.insert(eq_strings, {"→ TS "..d})
-            table.insert(eq_strings, {"↑ TS "..d})
-            local c = glob_disk_centers and glob_disk_centers[d]
-            if c and c.node_id then
-                table.insert(eq_strings, {"ΣM P"..c.node_id})
+        local sx, sy, sm = wert(k.last_x, k.last_x_str), wert(k.last_y, k.last_y_str), wert(k.last_m, k.last_m_str)
+        local r = math.rad(-(k.last_w or 0))
+        local c, sn = math.cos(r), math.sin(r)
+        return summe(mal(sx, c), mal(sy, -sn)), summe(mal(sx, sn), mal(sy, c)), sm
+    end
+
+    -- Resultierende und statisches Moment (um k1, entlang der Stabachse) der Streckenlasten eines Stabes
+    local function integriere(p_str, L)
+        local Ls = string.format("%.15g", L)
+        local R = casToNumber(math.eval("approx(integral(" .. p_str .. ",x,0," .. Ls .. "))")) or 0
+        local S = casToNumber(math.eval("approx(integral((" .. p_str .. ")*x,x,0," .. Ls .. "))")) or 0
+        return R, S
+    end
+    local function streckenlasten(s, L, ex, ey)
+        -- Bogen: Lasten wie in der FEM auf dem Bogen verteilt (bogenLastResultierende), als Kraft am
+        -- Stabanfang plus Moment um ihn
+        if istBogen(s) then
+            local r = bogenHatLast(s) and bogenLastResultierende(s)
+            if not r then return {} end
+            return { { R = r.summe[1], S = 0, cx = 1, cy = 0 }, { R = r.summe[2], S = 0, cx = 0, cy = 1 },
+                     { moment = true, M = r.summe[3] } }
+        end
+        local out = {}
+        local function trapezText(A_, B_) return string.format("(%.15g)+((%.15g)-(%.15g))*x/(%.15g)", A_, B_, A_, L) end
+        -- Querlast q (Richtung z = (-e_y, e_x)) und Laengslast n (Richtung e)
+        for _, art in ipairs({ { "q", -ey, ex }, { "n", ex, ey } }) do
+            local t = art[1]
+            local R, S
+            if sym then
+                R, S = processDistLoad_PvV(L, L, s[t .. "_str"], s[t .. "_A_str"], s[t .. "_B_str"], nil, nil, 0, 0, "q")
             else
-                table.insert(eq_strings, {"ΣM TS "..d})
+                local str = s[t .. "_str"] or ""
+                if str:hasx() then
+                    R, S = integriere("(" .. str .. ")+" .. trapezText(s[t .. "_A"] or 0, s[t .. "_B"] or 0), L)
+                else
+                    local a, c = (s[t] or 0) + (s[t .. "_A"] or 0), (s[t] or 0) + (s[t .. "_B"] or 0)
+                    R, S = (a + c) / 2 * L, L * L / 6 * (a + 2 * c)
+                end
             end
+            out[#out + 1] = { R = R, S = S, cx = art[2], cy = art[3] }
         end
-        for _, ne in ipairs(node_eqs) do
-            table.insert(A, ne.rx)
-            table.insert(A, ne.ry)
-            table.insert(b, {ne.bx})
-            table.insert(b, {ne.by})
-            table.insert(eq_strings, {"→ "..ne.name})
-            table.insert(eq_strings, {"↑ "..ne.name})
+        -- globale Linienlasten p_X (nach rechts) und p_Y (nach unten), ggf. projiziert
+        for _, art in ipairs({ { "gx", 1, 0, math.abs(ey) }, { "gy", 0, 1, math.abs(ex) } }) do
+            local t = art[1]
+            local L_eff = s[t .. "_proj"] and L * art[4] or L
+            local R, S
+            if sym then
+                R, S = processDistLoad_PvV(L, L_eff, s[t .. "_str"], nil, nil, nil, nil, 0, 0, "g")
+            else
+                local str, f = globaleLinienlast(s, t)
+                if str:hasx() then
+                    R, S = integriere("(" .. str .. ")*" .. string.format("%.15g", f), L)
+                else
+                    R = (s[t] or 0) * L_eff; S = R * L / 2
+                end
+            end
+            out[#out + 1] = { R = R, S = S, cx = art[2], cy = art[3] }
+        end
+        -- Streckenmoment m (gegen den Uhrzeigersinn je Laenge)
+        local M
+        if sym then
+            M = processDistLoad_PvV(L, L, s.m_str, nil, nil, nil, nil, 0, 0, "m")
+        elseif (s.m_str or ""):hasx() then
+            M = integriere("(" .. s.m_str .. ")", L)
+        else
+            M = (s.m or 0) * L
+        end
+        out[#out + 1] = { moment = true, M = M }
+        return out
+    end
+
+    -- Lagerunbekannte (Lager und Federn wie auf Seite 2)
+    local lagerVar = {}
+    local function lagerVariablen()
+        for i, k in ipairs(knoten) do
+            local L = getSuppLetter(i)
+            local v = {}
+            if k.lager_x or (k.cx or 0) > 0 then v.h = addVar(L .. "_h"); unbekannte[v.h].quelle = { knoten = i, komp = "h" } end
+            if k.lager_y or (k.cy or 0) > 0 then v.v = addVar(L .. "_v"); unbekannte[v.v].quelle = { knoten = i, komp = "v" } end
+            if not fachwerkModus and (k.lager_m or (k.cm or 0) > 0) then v.m = addVar("M_" .. L); unbekannte[v.m].quelle = { knoten = i, komp = "m" } end
+            lagerVar[i] = v
         end
     end
-    
+    local function lagerUndLasten(i, kp)
+        local k, v = knoten[i], lagerVar[i]
+        local w = math.rad(k.winkel or 0)
+        if v.h then unbekannt(kp, v.h, k.x, k.y, math.cos(w), -math.sin(w), 0) end
+        if v.v then unbekannt(kp, v.v, k.x, k.y, -math.sin(w), -math.cos(w), 0) end
+        if v.m then unbekannt(kp, v.m, k.x, k.y, 0, 0, 1) end
+        local fx, fy, m = knotenlast(k)
+        bekannt(kp, k.x, k.y, fx, 1, 0, 0)
+        bekannt(kp, k.x, k.y, fy, 0, 1, 0)
+        bekannt(kp, k.x, k.y, 0, 0, 0, m)
+    end
+
+    if fachwerkModus then
+        -- Knotenschnittverfahren: Stabkraefte S_j (Zug positiv, am Knoten vom Knoten weg)
+        local knotenKp = {}
+        for i, k in ipairs(knoten) do knotenKp[i] = neuerKoerper(k.x, k.y, false, { "→ K" .. i, "↑ K" .. i }) end
+        local sVar = {}
+        for j, s in ipairs(staebe) do if not s.is_cut then sVar[j] = addVar("S_" .. j); unbekannte[sVar[j]].quelle = { stab = j, komp = "S" } end end
+        lagerVariablen()
+        for j, s in ipairs(staebe) do
+            if sVar[j] then
+                local k1, k2 = knoten[s.k1], knoten[s.k2]
+                local dx, dy = k2.x - k1.x, k2.y - k1.y
+                local L = math.sqrt(dx * dx + dy * dy)
+                if L > 0 then
+                    unbekannt(knotenKp[s.k1], sVar[j], k1.x, k1.y, dx / L, dy / L, 0)
+                    unbekannt(knotenKp[s.k2], sVar[j], k2.x, k2.y, -dx / L, -dy / L, 0)
+                end
+            end
+        end
+        for i in ipairs(knoten) do lagerUndLasten(i, knotenKp[i]) end
+    else
+        if not glob_ts_scheibe or not glob_disk_centers then assignTeilsysteme() end
+        local ts_von = glob_ts_scheibe
+        local ts = {}
+        for d = 1, glob_num_disks do
+            local c = glob_disk_centers[d]
+            ts[d] = neuerKoerper(c.x, c.y, true, { "→ TS " .. d, "↑ TS " .. d,
+                c.node_id and ("ΣM P" .. c.node_id) or ("ΣM TS " .. d) })
+        end
+        local function tsVonStab(j) return j and ts_von[j] and ts[ts_von[j]] or nil end
+
+        lagerVariablen()
+
+        -- Gelenke
+        local bolzen = {}
+        for i, k in ipairs(knoten) do
+            local info = gelenkKnoten(i)
+            if info.numTS > 1 then
+                local nr = getHingeNumber(i)
+                local rest = (#info.R > 0) and tsVonStab(info.R[1]) or nil
+                local function freigabe(j)
+                    local s = staebe[j]
+                    local amA = (s.k1 == i)
+                    local rel_m = k.gelenk or (amA and s.gelenk_A) or ((not amA) and s.gelenk_B)
+                    local rel_n = (amA and s.n_gelenk_A) or ((not amA) and s.n_gelenk_B)
+                    local rel_q = (amA and s.q_gelenk_A) or ((not amA) and s.q_gelenk_B)
+                    return rel_m and true or false, rel_n and true or false, rel_q and true or false
+                end
+                local function groessen(j, suffix)
+                    local rel_m, rel_n, rel_q = freigabe(j)
+                    local g = {}
+                    if rel_m and not rel_n and not rel_q then
+                        g.x = addVar("Gx_" .. nr .. suffix); g.y = addVar("Gy_" .. nr .. suffix)
+                    else
+                        if not rel_n then g.n = addVar("Gn_" .. nr .. suffix) end
+                        if not rel_q then g.q = addVar("Gq_" .. nr .. suffix) end
+                        if not rel_m then g.m = addVar("Gm_" .. nr .. suffix) end
+                    end
+                    for komp, var in pairs(g) do unbekannte[var].quelle = { knoten = i, stab = j, komp = komp } end
+                    return g
+                end
+                -- Gelenkgroessen g des Stabes j am Koerper kp, in faktor * Richtung von Seite 2
+                local function eintragen(j, g, kp, faktor)
+                    local s = staebe[j]
+                    local d = gelenkRichtung(i, j, info) * faktor
+                    local ka, kb = knoten[s.k1], knoten[s.k2]
+                    local L = math.sqrt((kb.x - ka.x)^2 + (kb.y - ka.y)^2)
+                    local tx, ty = (kb.x - ka.x) / L, (kb.y - ka.y) / L
+                    if g.x then unbekannt(kp, g.x, k.x, k.y, d, 0, 0) end
+                    if g.y then unbekannt(kp, g.y, k.x, k.y, 0, d, 0) end
+                    if g.n then unbekannt(kp, g.n, k.x, k.y, d * tx, d * ty, 0) end
+                    if g.q then unbekannt(kp, g.q, k.x, k.y, -d * ty, d * tx, 0) end
+                    if g.m then unbekannt(kp, g.m, k.x, k.y, 0, 0, d) end
+                end
+                if info.numTS == 2 then
+                    local r1 = info.r1
+                    local g = groessen(r1, "")
+                    eintragen(r1, g, tsVonStab(r1), 1)
+                    eintragen(r1, g, rest or tsVonStab(info.H[2]), -1)
+                else
+                    local pin
+                    if not rest then
+                        local mitMoment = false
+                        for _, j in ipairs(info.H) do if not freigabe(j) then mitMoment = true end end
+                        local namen = { "→ G" .. nr, "↑ G" .. nr }
+                        if mitMoment then namen[3] = "ΣM G" .. nr end
+                        pin = { px = k.x, py = k.y, mitMoment = mitMoment, namen = namen, bolzen = true, rx = {}, ry = {}, rm = {},
+                                bx = zelle(), by = zelle(), bm = zelle() }
+                        bolzen[#bolzen + 1] = pin
+                    end
+                    for _, j in ipairs(info.H) do
+                        local g = groessen(j, "s" .. (ts_von[j] or j))
+                        eintragen(j, g, tsVonStab(j), 1)
+                        eintragen(j, g, rest or pin, -1)
+                    end
+                end
+            end
+        end
+
+        -- Lager und Knotenlasten am Teilsystem, an dem Seite 2 sie zeichnet
+        for i in ipairs(knoten) do
+            local kp = tsVonStab(lastStabKnoten(i))
+            if kp then lagerUndLasten(i, kp) end
+        end
+
+        -- Streckenlasten als Resultierende
+        for j, s in ipairs(staebe) do
+            local kp = tsVonStab(j)
+            if kp and not s.is_cut then
+                local k1, k2 = knoten[s.k1], knoten[s.k2]
+                local dx, dy = k2.x - k1.x, k2.y - k1.y
+                local L = math.sqrt(dx * dx + dy * dy)
+                if L > 1e-9 then
+                    local ex, ey = dx / L, dy / L
+                    for _, last in ipairs(streckenlasten(s, L, ex, ey)) do
+                        if last.moment then bekannt(kp, 0, 0, 0, 0, 0, last.M)
+                        else streckenlast(kp, k1, ex, ey, last.R, last.S, last.cx, last.cy) end
+                    end
+                end
+            end
+        end
+        for _, pin in ipairs(bolzen) do koerper[#koerper + 1] = pin end
+    end
+
+    -- Zeilen: je Koerper Summe nach rechts, nach oben (und Momente)
+    for _, kp in ipairs(koerper) do
+        local zeilen = { { kp.rx, kp.bx }, { kp.ry, kp.by } }
+        if kp.mitMoment then zeilen[3] = { kp.rm, kp.bm } end
+        for z, zl in ipairs(zeilen) do
+            local row = {}
+            for c = 1, #x_labels do row[c] = zellText(zl[1][c]) end
+            table.insert(A, row)
+            table.insert(b, { zellText(zl[2]) })
+            table.insert(eq_strings, { kp.namen[z] })
+        end
+    end
+    lgs_modell = { unbekannte = unbekannte, koerper = koerper, A = A, b = b, x = x_labels }
+
     if #A > 0 then
         for r = 1, #A do
             local new_r = {}
@@ -5035,7 +6294,9 @@ function on.charIn(char)
             platform.window:invalidate()
         elseif char == "o" or char == "O" then menuOffen, menuTyp, menuZeile, menuSeite, eingabeModus = true, "obermenue", 1, 1, false; platform.window:invalidate()
         elseif (char == "f" or char == "F") and hoverTyp == "stab" and hoverObj then
-            local s = staebe[hoverObj]; local temp = s.k1; s.k1 = s.k2; s.k2 = temp; local temp_q = s.q_A; s.q_A = s.q_B; s.q_B = temp_q; local temp_n = s.n_A; s.n_A = s.n_B; s.n_B = temp_n; platform.window:invalidate()
+            -- nur Start- und Endknoten tauschen, alle anderen Stabwerte bleiben, wie sie eingegeben sind
+            local s = staebe[hoverObj]; s.k1, s.k2 = s.k2, s.k1
+            systemBerechnet = false; updateAlleLasten(); platform.window:invalidate()
         elseif char == "b" or char == "B" then if starteBerechnung then starteBerechnung() end; platform.window:invalidate()
         elseif char == "c" or char == "C" then on.clearKey()
         elseif char == "l" or char == "L" then 
@@ -5120,11 +6381,11 @@ end
 
 local function getMenuMaxZeile()
     if menuTyp == "knoten" then
-        if menuSeite == 1 then return 6 elseif menuSeite == 2 then return 4 elseif menuSeite == 3 then return 4 elseif menuSeite == 4 then return 8 else return 6 end
+        if menuSeite == 1 then return 6 elseif menuSeite == 2 then return 5 elseif menuSeite == 3 then return 4 elseif menuSeite == 4 then return 9 else return 6 end
     elseif menuTyp == "stab" then
         if menuSeite == 1 then return 8 elseif menuSeite == 2 then return 4 elseif menuSeite == 3 then return 8 elseif menuSeite == 6 then return 6 elseif menuSeite == 7 then return 7 else return 6 end
     elseif menuTyp == "obermenue" then
-        if menuSeite == 1 then return 8 elseif menuSeite == 2 then return 9 elseif menuSeite == 3 then return 8 elseif menuSeite == 4 then return 4 else return 3 end
+        if menuSeite == 1 then return 8 elseif menuSeite == 2 then return 9 elseif menuSeite == 3 then return 9 elseif menuSeite == 4 then return 7 else return 3 end
     elseif menuTyp == "pvv_knoten" then
         return 4
     elseif menuTyp == "pvv_stab" then
@@ -5154,7 +6415,10 @@ function on.enterKey()
                 if eingabeModus then local z, s_val = evalInput(eingabeText, true); if z then if menuZeile==1 then k.last_x=z; sys_changed = true; k.last_x_str=s_val end; if menuZeile==2 then k.last_y=z; sys_changed = true; k.last_y_str=s_val end; if menuZeile==3 and not k.gelenk then k.last_m=z; sys_changed = true; k.last_m_str=s_val end; if menuZeile==4 then k.last_w=z; sys_changed = true; k.last_w_str=s_val end; if menuZeile==5 then k.winkel=z; sys_changed = true end end; eingabeModus = false elseif not (menuZeile == 3 and k.gelenk) then eingabeModus, eingabeText = true, "" end
             elseif menuSeite == 3 then
                 if eingabeModus then local z, s_val = evalInput(eingabeText, true); if z then if menuZeile==1 then k.cx=z; sys_changed = true; k.cx_str=s_val end; if menuZeile==2 then k.cy=z; sys_changed = true; k.cy_str=s_val end; if menuZeile==3 then k.cm=z; sys_changed = true; k.cm_str=s_val end; if menuZeile==4 then k.f_winkel=z; sys_changed = true end end; eingabeModus = false else eingabeModus, eingabeText = true, "" end
-            elseif menuSeite == 4 then if menuZeile == 4 then exportKnotenToTI(menuIndex); menuOffen = false; platform.window:invalidate(); return end end
+            elseif menuSeite == 4 then
+                if menuZeile == 1 then menuOffen = false; exportKnotenVerschiebungToTI(menuIndex); platform.window:invalidate(); return
+                elseif menuZeile == 9 then exportKnotenToTI(menuIndex); menuOffen = false; platform.window:invalidate(); return end
+            end
         elseif menuTyp == "stab" then
             local s = staebe[menuIndex]
             if menuSeite == 5 or menuSeite == 6 or (menuSeite == 7 and menuZeile ~= 7) then return end
@@ -5288,7 +6552,7 @@ function on.enterKey()
                 if menuZeile >= 1 and menuZeile <= 9 then
                     if menuZeile == 1 then exportAllToTI()
                     elseif menuZeile == 2 then exportBiegelinienToTI()
-                    elseif menuZeile == 3 then exportVerschiebungenToTI()
+                    elseif menuZeile == 3 then exportULinienToTI()
                     elseif menuZeile == 4 then exportKGVToTI()
                     elseif menuZeile == 5 then exportArbeitssatzToTI()
                     elseif menuZeile == 6 then exportSchnittkraefteToTI()
@@ -5305,6 +6569,7 @@ function on.enterKey()
                     if symbolischer_modus and systemBerechnet and starteBerechnung then starteBerechnung() end
                     platform.window:invalidate()
                 elseif menuZeile == 8 then zeigeMaxWerte = not zeigeMaxWerte; platform.window:invalidate()
+                elseif menuZeile == 9 then rasterPunkte = ((rasterPunkte or 1) + 1) % 3; platform.window:invalidate()
                 elseif eingabeModus then
                     eingabeModus = false
                     if menuZeile == 1 then local v = evalInput(eingabeText); if v and v > 0 then casToleranz = math.floor(v) end
@@ -5331,6 +6596,29 @@ function on.enterKey()
                 elseif menuZeile == 4 then
                     randStarrDirekt = not randStarrDirekt
                     platform.window:invalidate()
+                elseif menuZeile == 5 or menuZeile == 6 then
+                    -- System speichern als / System oeffnen: Nummer eingeben, Variable system<Nr>
+                    if eingabeModus then
+                        eingabeModus = false
+                        local nr = tonumber(eingabeText)
+                        if nr and nr >= 0 and nr == math.floor(nr) and nr < 1e6 then
+                            menuOffen = false
+                            if menuZeile == 5 then speichereSystem(nr) else oeffneSystem(nr) end
+                        else
+                            zeigeMeldung("Bitte eine ganze Zahl eingeben (z. B. 3 fuer system3).", "System")
+                        end
+                    else eingabeModus, eingabeText = true, "" end
+                elseif menuZeile == 7 then
+                    -- Variablen des Skripts loeschen: erstes Enter fragt nach, das zweite loescht
+                    if varLoeschFrage then
+                        varLoeschFrage = false
+                        loescheSkriptVariablen()
+                        menuOffen = false
+                        zeigeMeldung("Alle Variablen des Skripts geloescht (Exporte wie wneu, randbed, lgs, ux_k ...). Gespeicherte Systeme (system<Nr>) und eigene Variablen bleiben.", "Variablen loeschen")
+                    else
+                        varLoeschFrage = true
+                    end
+                    platform.window:invalidate()
                 end
             end
         end
@@ -5343,6 +6631,13 @@ function on.enterKey()
 end
 
 function on.arrowKey(key)
+    varLoeschFrage = false   -- Zeile verlassen: Nachfrage "Variablen loeschen" verfaellt
+    -- zu lange gelbe Box: hoch/runter blaettert zeilenweise durch den Text
+    if hinweisBoxScrollbar and not menuOffen and not eingabeModus and (key == "up" or key == "down") then
+        hinweisScroll = math.max(0, math.min(hinweisScrollMax, hinweisScroll + ((key == "down") and 1 or -1)))
+        platform.window:invalidate()
+        return
+    end
     if menuOffen and not eingabeModus then
         if menuTyp == "knoten" then 
             if not isKinematic then
@@ -5419,6 +6714,7 @@ function on.backspaceKey()
 end
 
 function on.escapeKey()
+    varLoeschFrage = false   -- offene Nachfrage "Variablen loeschen" verfaellt
     if loeschFrage then loeschFrage = false; platform.window:invalidate(); return end
     -- Reihenfolge wie auf dem Bildschirm von oben nach unten: Eingabe/Menue, Warnhinweise, dann Modi.
     -- Ein ESC schliesst alle sichtbaren Warnhinweise und tut sonst nichts.
@@ -5789,8 +7085,10 @@ buildPolplan = function()
                     local nx, ny = 0, 0
                     if k.lager_y then nx, ny = 0, 1 else nx, ny = 1, 0 end
                     if k.winkel and k.winkel ~= 0 then
+                        -- Lagerrichtungen wie in der Berechnung und Zeichnung (gegen den Uhrzeigersinn
+                        -- gedreht, y nach unten): xi = (cos, -sin), eta = (sin, cos)
                         local rad = math.rad(k.winkel)
-                        if k.lager_y then nx, ny = -math.sin(rad), math.cos(rad) else nx, ny = math.cos(rad), math.sin(rad) end
+                        if k.lager_y then nx, ny = math.sin(rad), math.cos(rad) else nx, ny = math.cos(rad), -math.sin(rad) end
                     end
                     local tx, ty = -ny, nx
                     local rot = true
@@ -6199,6 +7497,9 @@ calcKinematicStates = function()
     -- Wir durchlaufen alle Knoten und weisen ihnen die Verschiebung der Scheibe zu, an der sie befestigt sind.
     -- Knoten, die ein Gelenk haben, übernehmen die Verschiebung einer angeschlossenen Scheibe, die KEIN Gelenk hat (da sie starr mit dieser verbunden sind).
     kinematic_disk_states = states
+    -- global fuer den Arbeitssatz-Export: der steht in der Datei vor der zweiten Deklaration von
+    -- polplan und saehe sonst nur die erste, leere Tabelle
+    pvvPolplan = polplan
     kinematic_states = {}
     kinematic_states_staebe = {}
     kinematic_max_disp = 1
@@ -6210,10 +7511,16 @@ calcKinematicStates = function()
         
         for _, s in ipairs(staebe) do
             if s.k1 == i or s.k2 == i then
+                local is_k1 = (s.k1 == i)
+                local has_hinge = is_k1 and (s.gelenk_A or s.n_gelenk_A or s.q_gelenk_A) or (not is_k1 and (s.gelenk_B or s.n_gelenk_B or s.q_gelenk_B))
+                if s.scheibe and not states[s.scheibe] and not has_hinge then
+                    -- Knoten haengt ohne Gelenk an einer festen Scheibe: er bewegt sich nicht
+                    -- (auch wenn ein anderer Stab ueber ein N- oder Q-Gelenk angeschlossen ist)
+                    u_x, u_y, u_phi, u_scheibe = 0, 0, 0, nil
+                    assigned = false
+                    break
+                end
                 if s.scheibe and states[s.scheibe] then
-                    local is_k1 = (s.k1 == i)
-                    local has_hinge = is_k1 and (s.gelenk_A or s.n_gelenk_A or s.q_gelenk_A) or (not is_k1 and (s.gelenk_B or s.n_gelenk_B or s.q_gelenk_B))
-                    
                     if not assigned or not has_hinge then
                         local d = states[s.scheibe]
                         if d.type == "rot" then
@@ -6286,19 +7593,6 @@ getKinematicDisp_Stab = function(stabIdx)
     return ks.u1x, ks.u1y, ks.u2x, ks.u2y
 end
 
-getKinematicDisp_Point = function(scheibeIdx, x, y)
-    if not kinematic_disk_states or not kinematic_disk_states[scheibeIdx] then return 0, 0 end
-    local d = kinematic_disk_states[scheibeIdx]
-    if d.type == "rot" then
-        local u_x = -d.phi * (y - d.cy)
-        local u_y = d.phi * (x - d.cx)
-        return u_x, u_y
-    elseif d.type == "trans" then
-        return d.vx, d.vy
-    end
-    return 0, 0
-end
-
 -- NEU: Diese Funktion wird einmalig aufgerufen, wenn der PvV-Modus gestartet wird.
 -- Sie bereitet beliebige Lastfunktionen (wie sin(x)) über das TI-Nspire CAS vor.
 -- Wir berechnen exakt zwei Konstanten: Die Resultierende (R_cas) und das 
@@ -6339,123 +7633,169 @@ pvvPrepareCAS = function()
         
         -- Globale Lasten (gx und gy)
         if s.gx_str and s.gx_str:hasx() then
-            s.R_gx_cas = casToNumber(math.eval("approx(integral("..s.gx_str..",x,0,"..L_str.."))")) or 0
-            s.S_gx_cas = casToNumber(math.eval("approx(integral(("..s.gx_str..")*x,x,0,"..L_str.."))")) or 0
+            local g_str, f = globaleLinienlast(s, "gx")
+            s.R_gx_cas = casToNumber(math.eval("approx(integral(("..g_str..")*"..f..",x,0,"..L_str.."))")) or 0
+            s.S_gx_cas = casToNumber(math.eval("approx(integral(("..g_str..")*"..f.."*x,x,0,"..L_str.."))")) or 0
         else
             s.R_gx_cas = nil; s.S_gx_cas = nil
         end
         
         if s.gy_str and s.gy_str:hasx() then
-            s.R_gy_cas = casToNumber(math.eval("approx(integral("..s.gy_str..",x,0,"..L_str.."))")) or 0
-            s.S_gy_cas = casToNumber(math.eval("approx(integral(("..s.gy_str..")*x,x,0,"..L_str.."))")) or 0
+            local g_str, f = globaleLinienlast(s, "gy")
+            s.R_gy_cas = casToNumber(math.eval("approx(integral(("..g_str..")*"..f..",x,0,"..L_str.."))")) or 0
+            s.S_gy_cas = casToNumber(math.eval("approx(integral(("..g_str..")*"..f.."*x,x,0,"..L_str.."))")) or 0
         else
             s.R_gy_cas = nil; s.S_gy_cas = nil
         end
     end
 end
 
-getKinematicWork_Stab = function(stabIdx)
-    local s = staebe[stabIdx]
-    if not kinematic_disk_states or not kinematic_disk_states[s.scheibe] then return 0, "0" end
-    local k1, k2 = knoten[s.k1], knoten[s.k2]
-    local d = kinematic_disk_states[s.scheibe]
-    local phi = (d.type == "rot") and d.phi or 0
-    
-    local dx = k2.x - k1.x
-    local dy = k2.y - k1.y
-    local L = math.sqrt(dx^2 + dy^2)
-    if L < 1e-6 then return 0, "0" end
-    
-    local cosA = dx/L
-    local sinA = dy/L
-    
-    local uxA, uyA = getKinematicDisp_Point(s.scheibe, k1.x, k1.y)
-    
-    -- Verschiebungen des Knoten A im lokalen System des Stabes
-    local unA = uxA * cosA + uyA * sinA
-    local uqA = -uxA * sinA + uyA * cosA
-    
-    local qA = s.q + (s.q_A or 0)
-    local qB = s.q + (s.q_B or 0)
-    local nA = s.n + (s.n_A or 0)
-    local nB = s.n + (s.n_B or 0)
-    
-    -- Arbeit der Querlast:
-    local Rq = (qA + qB)/2 * L + (s.R_q_cas or 0)
-    local Sq = (L^2)/6 * (qA + 2*qB) + (s.S_q_cas or 0)
-    local w_q = uqA * Rq + phi * Sq
-    local w_q_str = nil
-    if math.abs(Rq) > 1e-4 then
-        local xs = Sq / Rq
-        local vs = uqA + phi * xs
-        w_q_str = string.format("Wq: %.2f * %.4f", Rq, vs)
-    elseif math.abs(Sq) > 1e-4 then
-        w_q_str = string.format("Wq: %.2f * %.4f", Sq, phi)
+-- Zeichnung und Menues des PvV-Modus holen Namen und Werte aus derselben Rechnung wie der Export
+-- (exportArbeitssatzToTI("anzeige")), damit sie 1:1 zu w_eq1 und pvv_kin passen. Gemerkt, bis sich
+-- der Verschiebungszustand aendert (calcKinematicStates legt dafuer jedes Mal neue Tabellen an).
+pvvAnzeigeCache = nil
+function pvvAnzeige()
+    if not in_pvv_release or not kinematic_disk_states then return nil end
+    local c = pvvAnzeigeCache
+    if c and c.zustand == kinematic_disk_states and c.bindung == pvv_released_binding
+        and c.symb == symbolischer_modus and c.format == zahlenFormat then return c.daten end
+    local ok, d = pcall(exportArbeitssatzToTI, "anzeige")
+    pvvAnzeigeCache = { zustand = kinematic_disk_states, bindung = pvv_released_binding,
+        symb = symbolischer_modus, format = zahlenFormat, daten = (ok and type(d) == "table") and d or nil }
+    return pvvAnzeigeCache.daten
+end
+
+-- "Name = Wert" eines Weges wie in pvv_kin (Spalte 3); nil, wenn der Export ihn nicht hat
+function pvvLabel(name)
+    local d = pvvAnzeige()
+    local w = d and d.wege[name]
+    return w and (name .. " = " .. w.text) or nil
+end
+
+-- Beschriftung einer Scheibe: "φ_1 = -2*φ_0", Bezugsscheibe "φ_3 = φ_0", verschobene "δ_2 = ..."
+function pvvScheibenText(i)
+    local d = pvvAnzeige()
+    local z = d and d.scheiben[i]
+    if not z then return "φ_" .. i end
+    return z.var .. " = " .. z.text
+end
+
+function pvvAnimFaktor(pxm)
+    return (0.5 * pxm) / (kinematic_max_disp and kinematic_max_disp > 1e-6 and kinematic_max_disp or 1)
+end
+
+-- Wege eines Knotens (Knotenlasten in Lastrichtung, H und V in Lagerrichtung): Pfeil von P - u*e
+-- nach P, u = Verschiebung in Richtung e; beschriftet wie pvv_kin
+function pvvZeichneKnotenWege(gc, i, px, py, pxm)
+    local d = pvvAnzeige()
+    if not d then return end
+    local ux, uy = getKinematicDisp(i)
+    local f = pvvAnimFaktor(pxm)
+    for _, w in ipairs(d.reihe) do
+        if w.knoten == i and w.ex and w.name ~= "δ_G" then
+            local u = (ux * w.ex + uy * w.ey) * f
+            local ax, ay = px - w.ex * u, py - w.ey * u
+            gc:setColorRGB(200, 0, 200)
+            drawArrow(gc, ax, ay, px, py)
+            gc:setFont("sansserif", "r", 8)
+            gc:drawString(w.name .. " = " .. w.text, ax + 5, ay - 10)
+        end
     end
-    
-    -- Arbeit der Axiallast:
-    local Rn = (nA + nB)/2 * L + (s.R_n_cas or 0)
-    local Sn = (s.S_n_cas or 0)
-    local w_n = unA * Rn + phi * Sn
-    local w_n_str = nil
-    if math.abs(Rn) > 1e-4 then
-        local xs = Sn / Rn
-        local vs = unA + phi * xs
-        w_n_str = string.format("Wn: %.2f * %.4f", Rn, vs)
-    elseif math.abs(Sn) > 1e-4 then
-        w_n_str = string.format("Wn: %.2f * %.4f", Sn, phi)
+end
+
+-- gegenseitige Verdrehung am geloesten Momentengelenk (φ_G) neben dem Gelenk
+function pvvZeichneGelenkWinkel(gc, pxm)
+    local b = pvv_released_binding
+    if not b or (b.type ~= "m_gelenk" and b.type ~= "knoten_gelenk") then return end
+    local lbl = pvvLabel("φ_G")
+    if not lbl then return end
+    local n = b.node or (b.endA and staebe[b.stab].k1 or staebe[b.stab].k2)
+    local ux, uy = getKinematicDisp(n)
+    local f = pvvAnimFaktor(pxm)
+    gc:setColorRGB(200, 0, 200); gc:setFont("sansserif", "r", 8)
+    gc:drawString(lbl, knoten[n].x * pxm + offsetX + ux * f + 20, knoten[n].y * pxm + offsetY + uy * f + 12)
+end
+
+-- Scheibe, die sich nur verschiebt: "δ_i = ..." an ihrem ersten Stab
+function pvvZeichneVerschiebung(gc, i, pxm)
+    local d = pvvAnzeige()
+    if not d or not d.scheiben[i] then return end
+    for j, s in ipairs(staebe) do
+        if s.scheibe == i then
+            local u1x, u1y, u2x, u2y = getKinematicDisp_Stab(j)
+            local f = pvvAnimFaktor(pxm)
+            local k1, k2 = knoten[s.k1], knoten[s.k2]
+            gc:setColorRGB(0, 0, 255); gc:setFont("sansserif", "r", 10)
+            gc:drawString(pvvScheibenText(i), (k1.x + k2.x) / 2 * pxm + offsetX + (u1x + u2x) / 2 * f + 8,
+                (k1.y + k2.y) / 2 * pxm + offsetY + (u1y + u2y) / 2 * f - 22)
+            return
+        end
     end
-    
-    -- Arbeit der globalen Last gx(x)
-    local gx = s.gx or 0
-    local dy_real = knoten[s.k2].y - knoten[s.k1].y
-    local Rgx = gx * (s.gx_proj and math.abs(dy_real) or L) + (s.R_gx_cas or 0)
-    local Sgx = Rgx * (L/2) + (s.S_gx_cas or 0)
-    local w_gx = Rgx * uxA - Sgx * phi * sinA
-    local w_gx_str = nil
-    if math.abs(Rgx) > 1e-4 then
-        local xs = Sgx / Rgx
-        local uxs = uxA - phi * sinA * xs
-        w_gx_str = string.format("Wgx: %.2f * %.4f", Rgx, uxs)
-    elseif math.abs(Sgx) > 1e-4 then
-        w_gx_str = string.format("Wgx: %.2f * %.4f", -Sgx * sinA, phi)
+end
+
+-- Zeilen des PvV-Menues eines Knotens bzw. Stabes, alles wie im Export: Wege (Spalte 3 von
+-- pvv_kin), Drehwinkel der beteiligten Scheiben, Arbeitsanteile (die Terme von w_eq1)
+function pvvMenueZeilen(typ, idx)
+    local d = pvvAnzeige()
+    local zeilen = {}
+    if not d then return zeilen end
+    -- "(1) * " weg und Klammern um einzelne Namen, aber nicht um Funktionsargumente wie sqrt(2)
+    local function kurz(t)
+        t = t:gsub("%(1%) %* ", "")
+        t = (" " .. t):gsub("([^%w_])%(([%w_%.]+)%)", "%1%2")
+        return t:sub(2)
     end
-    
-    -- Arbeit der globalen Last gy(x)
-    local gy = s.gy or 0
-    local dx_real = knoten[s.k2].x - knoten[s.k1].x
-    local Rgy = gy * (s.gy_proj and math.abs(dx_real) or L) + (s.R_gy_cas or 0)
-    local Sgy = Rgy * (L/2) + (s.S_gy_cas or 0)
-    local w_gy = Rgy * uyA + Sgy * phi * cosA
-    local w_gy_str = nil
-    if math.abs(Rgy) > 1e-4 then
-        local xs = Sgy / Rgy
-        local uys = uyA + phi * cosA * xs
-        w_gy_str = string.format("Wgy: %.2f * %.4f", Rgy, uys)
-    elseif math.abs(Sgy) > 1e-4 then
-        w_gy_str = string.format("Wgy: %.2f * %.4f", Sgy * cosA, phi)
+    local function gehoert(e) return (typ == "knoten" and e.knoten == idx) or (typ == "stab" and e.stab == idx) end
+    local wege, arbeit, scheiben, gesehen = {}, {}, {}, {}
+    local function merke(i)
+        if i and d.scheiben[i] and not gesehen[i] then gesehen[i] = true; scheiben[#scheiben + 1] = i end
     end
-    
-    -- Arbeit der Momentenlast
-    local m = s.m or 0
-    local Rm = m * L + (s.R_m_cas or 0)
-    local w_m = Rm * phi
-    local w_m_str = nil
-    if math.abs(Rm) > 1e-4 then
-        w_m_str = string.format("Wm: %.2f * %.4f", Rm, phi)
+    if typ == "stab" and staebe[idx] then merke(staebe[idx].scheibe) end
+    for _, w in ipairs(d.reihe) do
+        if gehoert(w) then
+            wege[#wege + 1] = w.name .. " = " .. w.text
+            arbeit[#arbeit + 1] = kurz(w.kraftText .. " * " .. w.name)
+        end
     end
-    
-    local w_tot = w_q + w_n + w_gx + w_gy + w_m
-    
-    local terms = {}
-    if w_q_str then table.insert(terms, w_q_str) end
-    if w_n_str then table.insert(terms, w_n_str) end
-    if w_gx_str then table.insert(terms, w_gx_str) end
-    if w_gy_str then table.insert(terms, w_gy_str) end
-    if w_m_str then table.insert(terms, w_m_str) end
-    
-    if #terms == 0 then return 0, {} end
-    return w_tot, terms
+    for _, m in ipairs(d.momente) do
+        if gehoert(m) then arbeit[#arbeit + 1] = kurz(m.text); merke(m.scheibe) end
+    end
+    if #wege > 0 then
+        zeilen[#zeilen + 1] = { "Wege (pvv_kin):", "kopf" }
+        for _, t in ipairs(wege) do zeilen[#zeilen + 1] = { t, "weg" } end
+    end
+    if #scheiben > 0 then
+        zeilen[#zeilen + 1] = { "Scheiben:", "kopf" }
+        for _, i in ipairs(scheiben) do zeilen[#zeilen + 1] = { pvvScheibenText(i), "scheibe" } end
+    end
+    if #arbeit > 0 then
+        zeilen[#zeilen + 1] = { "Arbeit (Terme von w_eq1):", "kopf" }
+        for _, t in ipairs(arbeit) do zeilen[#zeilen + 1] = { t, "arbeit" } end
+    end
+    return zeilen
+end
+
+function pvvMenueHoehe(typ, idx)
+    local n = #pvvMenueZeilen(typ, idx)
+    return n > 0 and (46 + 14 * n) or 70
+end
+
+PVV_MENUE_FARBEN = { kopf = { 0, 0, 0 }, weg = { 200, 0, 200 }, scheibe = { 0, 120, 0 }, arbeit = { 200, 50, 50 } }
+function pvvZeichneMenue(gc, typ, idx, b)
+    local zeilen = pvvMenueZeilen(typ, idx)
+    if #zeilen == 0 then
+        gc:setColorRGB(150, 150, 150); gc:setFont("sansserif", "r", 9)
+        gc:drawString("Keine Arbeit an " .. (typ == "knoten" and "diesem Knoten" or "diesem Stab"), b - 160, 38)
+        return
+    end
+    local y = 38
+    for _, z in ipairs(zeilen) do
+        local f = PVV_MENUE_FARBEN[z[2]]
+        gc:setColorRGB(f[1], f[2], f[3])
+        gc:setFont("sansserif", z[2] == "kopf" and "b" or "r", 8)
+        gc:drawString(z[1], b - 160 + (z[2] == "kopf" and 0 or 6), y)
+        y = y + 14
+    end
 end
 
 local function getScreenEdgeIntersection(px, py, dx, dy, b, h)
@@ -6618,6 +7958,120 @@ function merkeResultierende(x, y)
     table.insert(glob_resultant_pts, {x = x, y = y, is_virtual = false})
 end
 
+-- Bogen in Bildschirmkoordinaten zwischen (px1, py1) und (px2, py2), wie er gezeichnet wird (fuer
+-- bogenPunkt); nil, wenn der Radius kleiner als die halbe Sehne ist
+function bogenBildGeometrie(s, px1, py1, px2, py2, skala)
+    local dx, dy = px2 - px1, py2 - py1
+    local L = math.sqrt(dx^2 + dy^2)
+    local R = math.abs(s.bogen_r or 0) * skala
+    if L <= 0 or R < L / 2 then return nil end
+    return { R = R, sgn = s.bogen_r > 0 and -1 or 1, alpha = 2 * math.asin(math.min(1, L / (2 * R))),
+        d = math.sqrt(math.max(0, R^2 - (L / 2)^2)), mx = (px1 + px2) / 2, my = (py1 + py2) / 2, ex = dx / L, ey = dy / L }
+end
+
+-- Punkt (Weltkoordinaten) auf der Wirkungslinie einer Resultierenden (Fx, Fy) mit Moment M um den
+-- Stabanfang (gegen den Uhrzeigersinn) eines Bogens: Schnitt mit dem Bogen (der Bogenmitte naechste),
+-- ohne Schnitt der Fusspunkt des Lots von der Bogenmitte
+function bogenWirkungspunkt(s, Fx, Fy, M)
+    local g = bogenGeometrie(s, 2)
+    local k1 = knoten[s.k1]
+    local F = math.sqrt(Fx^2 + Fy^2)
+    local fx, fy = Fx / F, Fy / F
+    local x0, y0 = k1.x - M / F * fy, k1.y + M / F * fx
+    local function abstand(x, y) return (x - x0) * fy - (y - y0) * fx end
+    local mx, my = bogenPunkt(g, g.alpha / 2)
+    local px, py = mx - abstand(mx, my) * fy, my + abstand(mx, my) * fx
+    local best = math.huge
+    local n = 40
+    local ax, ay = bogenPunkt(g, 0)
+    local da = abstand(ax, ay)
+    for j = 1, n do
+        local bx, by = bogenPunkt(g, g.alpha * j / n)
+        local db = abstand(bx, by)
+        if (da <= 0 and db >= 0) or (da >= 0 and db <= 0) then
+            local f = (da ~= db) and da / (da - db) or 0
+            local cx, cy = ax + f * (bx - ax), ay + f * (by - ay)
+            local d = (cx - mx)^2 + (cy - my)^2
+            if d < best then best, px, py = d, cx, cy end
+        end
+        ax, ay, da = bx, by, db
+    end
+    return px, py
+end
+
+-- PvV-Ansicht: Resultierende aller Lasten eines Bogens (wie im Arbeitssatz) mit den Wegen
+-- δ_s<i>x und δ_s<i>y aus dem Export. (opx1, opy1) = Stabanfang im Bild (mit Verschiebung), die
+-- Scheibe ist starr: u(P) = u1 + theta * (-(P-K1)_y, (P-K1)_x). Die Resultierende kommt aus
+-- s.bogen_res (updateAlleLasten), nicht aus dem Export: das CAS waere im Zeichenaufruf zu langsam.
+function zeichneBogenPvv(gc, s, i, opx1, opy1, skala)
+    local r = s.bogen_res
+    if not r then return end
+    local Fx, Fy, M = r.summe[1], r.summe[2], r.summe[3]
+    local F = math.sqrt(Fx^2 + Fy^2)
+    local k1, k2 = knoten[s.k1], knoten[s.k2]
+    local u1x, u1y, u2x, u2y = getKinematicDisp_Stab(i)
+    local lx, ly = k2.x - k1.x, k2.y - k1.y
+    local theta = ((u2x - u1x) * -ly + (u2y - u1y) * lx) / (lx^2 + ly^2)
+    local anim_f = (0.5 * skala) / (kinematic_max_disp and kinematic_max_disp > 1e-6 and kinematic_max_disp or 1)
+    gc:setFont("sansserif", "r", 8)
+    if F > 1e-4 then
+        local wx, wy = bogenWirkungspunkt(s, Fx, Fy, M)
+        local ux = u1x - theta * (wy - k1.y)
+        local uy = u1y + theta * (wx - k1.x)
+        -- (opx1, opy1) ist schon um u1 verschoben, dazu nur die Drehung um den Stabanfang
+        local px = opx1 + (wx - k1.x) * skala + (ux - u1x) * anim_f
+        local py = opy1 + (wy - k1.y) * skala + (uy - u1y) * anim_f
+        gc:setColorRGB(255, 0, 0)
+        drawArrow(gc, px - Fx / F * 25, py - Fy / F * 25, px, py)
+        gc:drawString(string.format("R = %.2f", F), px - Fx / F * 25 + 5, py - Fy / F * 25 - 10)
+        for _, w in ipairs({ { "x", ux * anim_f, 0 }, { "y", 0, uy * anim_f } }) do
+            local lbl = pvvLabel("δ_s" .. i .. w[1])
+            if lbl then
+                gc:setColorRGB(200, 0, 200)
+                drawArrow(gc, px - w[2], py - w[3], px, py)
+                gc:drawString(lbl, px - w[2] + 5, py - w[3] - 10)
+            end
+        end
+    elseif math.abs(M) > 1e-4 then
+        local g = bogenGeometrie(s, 2)
+        local mx, my = bogenPunkt(g, g.alpha / 2)
+        local px, py = opx1 + (mx - k1.x) * skala, opy1 + (my - k1.y) * skala
+        gc:setColorRGB(255, 150, 0)
+        drawMoment(gc, px, py, 12, M < 0)
+        gc:drawString(string.format("M = %.2f", math.abs(M)), px + 15, py - 10)
+    end
+end
+
+-- E-Seite und Teilsystem-Hover: Lasten auf einem Bogen als Resultierende je Lastart (s.bogen_res aus
+-- updateAlleLasten). Kraft in ihrer Richtung auf der Wirkungslinie, Fusspunkt auf dem Bogen (sonst
+-- nahe der Bogenmitte); ohne Kraft ein Drehpfeil fuer das Moment. (opx1, opy1) = Stabanfang im Bild.
+function zeichneBogenResultierende(gc, s, opx1, opy1, skala, resPfeil)
+    local res = s.bogen_res
+    local g = bogenGeometrie(s, 2)
+    if not res or not g then return end
+    local k1 = knoten[s.k1]
+    local function bild(x, y) return opx1 + (x - k1.x) * skala, opy1 + (y - k1.y) * skala end
+    local mx, my = bogenPunkt(g, g.alpha / 2)
+    for _, art in ipairs({ "q", "n", "gx", "gy", "m" }) do
+        local Fx, Fy, M = res[art][1], res[art][2], res[art][3]
+        local F = math.sqrt(Fx^2 + Fy^2)
+        if art == "q" or art == "n" then gc:setColorRGB(255, 50, 50) else gc:setColorRGB(255, 150, 0) end
+        gc:setFont("sansserif", "b", 8)
+        if F > 1e-4 then
+            local fx, fy = Fx / F, Fy / F
+            local px, py = bogenWirkungspunkt(s, Fx, Fy, M)
+            local sx, sy = bild(px, py)
+            drawArrow(gc, sx - fx * resPfeil, sy - fy * resPfeil, sx, sy)
+            gc:drawString("R = " .. formatLabel(F), sx - fx * (resPfeil + 5) + 5, sy - fy * (resPfeil + 5) - 10)
+            merkeResultierende(px, py)
+        elseif math.abs(M) > 1e-4 then
+            local sx, sy = bild(mx, my)
+            drawMoment(gc, sx, sy, 12, M < 0)
+            gc:drawString("M = " .. formatLabel(math.abs(M)), sx + 15, sy - 10)
+        end
+    end
+end
+
 local function getSymbLabel(s, mode, type_str, num_val)
     
     if symbolischer_modus and s["symb_" .. mode .. "_" .. type_str] then
@@ -6696,8 +8150,10 @@ function on.paint(gc)
     gc:setColorRGB(0, 0, 0)
     gc:setFont("sansserif", "b", 12)
     gc:setColorRGB(180, 180, 180)
-    for rx = startX, b, stepPx do
-        for ry = startY, h, stepPx do gc:fillRect(rx, ry, 1, 1) end
+    if rasterPunkte ~= 0 then   -- ohne neue Locals: on.paint ist nah an der Grenze von 200
+        for rx = startX, b, stepPx do
+            for ry = startY, h, stepPx do gc:fillRect(rx, ry, (rasterPunkte == 2) and 2 or 1, (rasterPunkte == 2) and 2 or 1) end
+        end
     end
     gc:setColorRGB(200, 200, 255); gc:drawLine(offsetX, 0, offsetX, h); gc:drawLine(0, offsetY, b, offsetY)
 
@@ -6748,7 +8204,20 @@ function on.paint(gc)
             local z_val = p_val and (n_val + 3*p_val - r_val) or nil
             gc:setFont("sansserif", "r", 9); gc:setColorRGB(60, 60, 60)
             local tip1, tip2
-            if p_val and z_val then
+            if fachwerkModus then
+                -- Fachwerk: n = s + r - 2k (Federn zaehlen als Lager wie in getTopologicalN)
+                local r_fw = 0
+                for _, k in ipairs(knoten) do
+                    if k.lager_x or (k.cx or 0) > 0 then r_fw = r_fw + 1 end
+                    if k.lager_y or (k.cy or 0) > 0 then r_fw = r_fw + 1 end
+                    if k.lager_m or (k.cm or 0) > 0 then r_fw = r_fw + 1 end
+                end
+                local s_fw, k_fw = #staebe, #knoten
+                local n_fw = s_fw + r_fw - 2 * k_fw
+                tip1 = string.format("s=%d  r=%d  k=%d", s_fw, r_fw, k_fw)
+                tip2 = string.format("n=s+r-2k: %d+%d-%d=%d", s_fw, r_fw, 2 * k_fw, n_fw)
+                if n_fw ~= n_val then tip2 = tip2 .. " (kein reines Fachwerk)" end
+            elseif p_val and z_val then
                 tip1 = string.format("r=%d  z=%d  p=%d", r_val, z_val, p_val)
                 tip2 = string.format("n=r+z-3p: %d+%d-%d=%d", r_val, z_val, 3*p_val, n_val)
             else
@@ -6775,12 +8244,21 @@ function on.paint(gc)
         end
     end
 
+    -- Protokoll der Seite 2 (nur fuer Tests: E2_PROTOKOLL = {} setzen): Name und Richtung jedes Pfeils
+    local function e2Pfeil(name, dx, dy)
+        if E2_PROTOKOLL and explosionPage == 2 then table.insert(E2_PROTOKOLL, { name = name, dx = dx, dy = dy }) end
+    end
+    local function e2Moment(name, isClockwise)
+        if E2_PROTOKOLL and explosionPage == 2 then table.insert(E2_PROTOKOLL, { name = name, m = isClockwise and -1 or 1 }) end
+    end
+
     local function drawReactionArrow(gc, val, dirX, dirY, cx, cy, labelPrefix, symb_label, custom_val_str, forceDraw)
         if math.abs(val) < 1e-4 and not forceDraw then return end
         local arrowLen = math.max(18, drawPxProMeter * 0.24)   -- kurze Pfeile im E-Modus
         local sign = val >= 0 and 1 or -1
         if forceDraw then sign = 1 end
         local mag = math.abs(val)
+        e2Pfeil(symb_label or labelPrefix:gsub(" = ", ""), sign * dirX, sign * dirY)
 
         local tailX = cx - sign * dirX * arrowLen
         local tailY = cy - sign * dirY * arrowLen
@@ -6814,6 +8292,7 @@ function on.paint(gc)
         if forceDraw then sign = 1 end
         if forceDraw and flipMultiplier then sign = sign * flipMultiplier end
         local mag = math.abs(val)
+        e2Pfeil(symb_label or labelPrefix:gsub(" = ", ""), sign * dirX, sign * dirY)
 
         local tailX = x - sign * dirX * arrowLen
         local tailY = y - sign * dirY * arrowLen
@@ -6884,7 +8363,9 @@ function on.paint(gc)
                             local v_part_cas_EI = (s.v_cas_pts_EI and s.v_cas_pts_EI[j+1]) or 0
                             val = (val_homogen_EI + v_part_class_EI + v_part_cas_EI) / EI
                         end
-                        if math.abs(val) < 1e-5 then val = 0 end
+                        -- Rauschen unterdruecken: Kraefte unter 1e-5, Verschiebungen (in m) erst unter 1e-12,
+                        -- sonst fehlt bei Verformungen unter 0,01 mm die Linie bzw. ein Stueck wird flach
+                        if math.abs(val) < (((ansichtsModus == "W" or ansichtsModus == "U") and 1e-12) or 1e-5) then val = 0 end
                         if math.abs(val) > max_val then max_val = math.abs(val) end
                     end
                 end
@@ -6900,8 +8381,8 @@ function on.paint(gc)
                 else
                     for _, pd in ipairs(s.arc_plot_data) do
                         local v1, v2 = 0, 0
-                        if ansichtsModus == "N" then v1 = pd.N; v2 = pd.N
-                        elseif ansichtsModus == "Q" then v1 = pd.Q; v2 = pd.Q
+                        if ansichtsModus == "N" then v1 = pd.N; v2 = pd.N2 or pd.N
+                        elseif ansichtsModus == "Q" then v1 = pd.Q; v2 = pd.Q2 or pd.Q
                         elseif ansichtsModus == "M" then v1 = pd.M1; v2 = pd.M2
                         end
                         if math.abs(v1) > max_val then max_val = math.abs(v1) end
@@ -7161,7 +8642,9 @@ function on.paint(gc)
             end
                 if in_pvv_release and isKinematic then
                     local L_m = math.sqrt((knoten[s.k2].x - knoten[s.k1].x)^2 + (knoten[s.k2].y - knoten[s.k1].y)^2)
-                    if L_m > 0 then
+                    if L_m > 0 and istBogen(s) then
+                        zeichneBogenPvv(gc, s, i, orig_px1, orig_py1, drawPxProMeter)
+                    elseif L_m > 0 then
                         local u_phys_xA, u_phys_yA, u_phys_xB, u_phys_yB = getKinematicDisp_Stab(i)
                         local orig_dx_phys = knoten[s.k2].x - knoten[s.k1].x
                         local orig_dy_phys = knoten[s.k2].y - knoten[s.k1].y
@@ -7169,18 +8652,7 @@ function on.paint(gc)
                         local cA = L_phys > 0 and orig_dx_phys/L_phys or 1
                         local sA = L_phys > 0 and orig_dy_phys/L_phys or 0
                         
-                        local phi_stab = 0
-                        if L_phys > 1e-6 then phi_stab = (orig_dx_phys * (u_phys_yB - u_phys_yA) - orig_dy_phys * (u_phys_xB - u_phys_xA)) / (L_phys^2) end
-                        local phi_abs = math.abs(phi_stab)
-                        local function formatDeltaStab(lbl, val)
-                            if phi_abs > 1e-4 then 
-                                return string.format("%s = %.2f * φ_0", lbl, math.abs(val)/phi_abs)
-                            else 
-                                local real_lbl = (s.scheibe and kinematic_disk_states and kinematic_disk_states[s.scheibe] and kinematic_disk_states[s.scheibe].type == "trans") and string.format("δ_%d", s.scheibe) or lbl
-                                return string.format("%s = %.2f", real_lbl, math.abs(val)) 
-                            end
-                        end
-                        
+                        -- Wege mit Namen und Wert aus dem Export (pvvLabel), 1:1 wie pvv_kin
                         local anim_f = (0.5 * drawPxProMeter) / (kinematic_max_disp and kinematic_max_disp > 1e-6 and kinematic_max_disp or 1)
 
                         local qA = s.q + (s.q_A or 0); local qB = s.q + (s.q_B or 0)
@@ -7200,12 +8672,13 @@ function on.paint(gc)
                             local uxs = u_phys_xA + (xs / L_phys) * (u_phys_xB - u_phys_xA)
                             local uys = u_phys_yA + (xs / L_phys) * (u_phys_yB - u_phys_yA)
                             local vs = -uxs * sA + uys * cA
-                            if math.abs(Rq * vs) > 1e-4 then
+                            lbl = pvvLabel("δ_s" .. i .. "q")
+                            if lbl then
                                 local disp_px = vs * anim_f
                                 local ax1, ay1 = px - (-sA) * disp_px, py - cA * disp_px
                                 gc:setColorRGB(200, 0, 200)
                                 drawArrow(gc, ax1, ay1, px, py)
-                                gc:drawString(formatDeltaStab("δ_q", vs), ax1 + 5, ay1 - 10)
+                                gc:drawString(lbl, ax1 + 5, ay1 - 10)
                             end
                         end
                         
@@ -7226,17 +8699,18 @@ function on.paint(gc)
                             local uxs = u_phys_xA + (xs / L_phys) * (u_phys_xB - u_phys_xA)
                             local uys = u_phys_yA + (xs / L_phys) * (u_phys_yB - u_phys_yA)
                             local us = uxs * cA + uys * sA
-                            if math.abs(Rn * us) > 1e-4 then
+                            lbl = pvvLabel("δ_s" .. i .. "n")
+                            if lbl then
                                 local disp_px = us * anim_f
                                 local ax1, ay1 = px - cA * disp_px, py - sA * disp_px
                                 gc:setColorRGB(200, 0, 200)
                                 drawArrow(gc, ax1, ay1, px, py)
-                                gc:drawString(formatDeltaStab("δ_n", us), ax1 + 5, ay1 - 10)
+                                gc:drawString(lbl, ax1 + 5, ay1 - 10)
                             end
                         end
                         
                         local Rgy = (s.gy or 0) * (s.gy_proj and math.abs(orig_dx_phys) or L_phys) + (s.R_gy_cas or 0)
-                        local Sgy = Rgy * (L_phys/2) + (s.S_gy_cas or 0)
+                        local Sgy = (s.gy or 0) * (s.gy_proj and math.abs(orig_dx_phys) or L_phys) * (L_phys/2) + (s.S_gy_cas or 0)
                         if math.abs(Rgy) > 1e-4 then
                             local xs = Sgy / Rgy
                             local px = px1 + dx * (xs / L_phys); local py = py1 + dy * (xs / L_phys)
@@ -7250,17 +8724,18 @@ function on.paint(gc)
                             gc:drawString(lbl, px + 5, py + h - 10)
                             
                             local uys = u_phys_yA + (xs / L_phys) * (u_phys_yB - u_phys_yA)
-                            if math.abs(Rgy * uys) > 1e-4 then
+                            lbl = pvvLabel("δ_s" .. i .. "y")
+                            if lbl then
                                 local disp_px = uys * anim_f
                                 local ax1, ay1 = px, py - disp_px
                                 gc:setColorRGB(200, 0, 200)
                                 drawArrow(gc, ax1, ay1, px, py)
-                                gc:drawString(formatDeltaStab("δ_gy", uys), ax1 + 5, ay1 - 10)
+                                gc:drawString(lbl, ax1 + 5, ay1 - 10)
                             end
                         end
                         
                         local Rgx = (s.gx or 0) * (s.gx_proj and math.abs(orig_dy_phys) or L_phys) + (s.R_gx_cas or 0)
-                        local Sgx = Rgx * (L_phys/2) + (s.S_gx_cas or 0)
+                        local Sgx = (s.gx or 0) * (s.gx_proj and math.abs(orig_dy_phys) or L_phys) * (L_phys/2) + (s.S_gx_cas or 0)
                         if math.abs(Rgx) > 1e-4 then
                             local xs = Sgx / Rgx
                             local px = px1 + dx * (xs / L_phys); local py = py1 + dy * (xs / L_phys)
@@ -7274,12 +8749,13 @@ function on.paint(gc)
                             gc:drawString(lbl, px + h + 5, py - 10)
                             
                             local uxs = u_phys_xA + (xs / L_phys) * (u_phys_xB - u_phys_xA)
-                            if math.abs(Rgx * uxs) > 1e-4 then
+                            lbl = pvvLabel("δ_s" .. i .. "x")
+                            if lbl then
                                 local disp_px = uxs * anim_f
                                 local ax1, ay1 = px - disp_px, py
                                 gc:setColorRGB(200, 0, 200)
                                 drawArrow(gc, ax1, ay1, px, py)
-                                gc:drawString(formatDeltaStab("δ_gx", uxs), ax1 + 5, ay1 - 10)
+                                gc:drawString(lbl, ax1 + 5, ay1 - 10)
                             end
                         end
                         
@@ -7304,7 +8780,19 @@ function on.paint(gc)
                 local zeigeResultierende = isExplosion
                     or (hovered_ts and glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts) or false
                 local resPfeil = isExplosion and math.max(18, drawPxProMeter * 0.24) or 40
-                if zeigeResultierende and (has_classic_gy or has_cas_gy) then
+                -- Bogen: Lasten entlang des Bogens (t = Anteil des Winkels, wie x in den Lastfunktionen),
+                -- Resultierende je Lastart in beliebiger Richtung (zeichneBogenResultierende)
+                local gb = istBogen(s) and bogenBildGeometrie(s, px1, py1, px2, py2, drawPxProMeter) or nil
+                local function achse(t)
+                    if gb then
+                        local ax, ay, atx, aty = bogenPunkt(gb, t * gb.alpha)
+                        return ax, ay, atx, aty, -aty, atx
+                    end
+                    return px1 + dx * t, py1 + dy * t, ux, uy, nx, ny
+                end
+                local resGerade = zeigeResultierende and not gb
+                if zeigeResultierende and gb then zeichneBogenResultierende(gc, s, orig_px1, orig_py1, drawPxProMeter, resPfeil) end
+                if resGerade and (has_classic_gy or has_cas_gy) then
                     local dx_m, dy_m = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
                     local L_phys = math.sqrt(dx_m^2 + dy_m^2)
                     local L_eff = s.gy_proj and math.abs(dx_m) or L_phys
@@ -7323,7 +8811,7 @@ function on.paint(gc)
                             px_res + 5, py_res - (resPfeil + 5) * dir - 10)
                         merkeResultierende(knoten[s.k1].x + ux * x_res, knoten[s.k1].y + uy * x_res)
                     end
-                elseif has_classic_gy or has_cas_gy then
+                elseif not zeigeResultierende and (has_classic_gy or has_cas_gy) then
                     local steps = 10
                     local max_gy = 0
                     if has_cas_gy and s.gy_pts then
@@ -7335,16 +8823,20 @@ function on.paint(gc)
                         local scale_gy = 20 / max_gy
                         if s.gy_proj then
                             local ref_gy = has_cas_gy and (s.gy_pts and s.gy_pts[1] or 0) or s.gy
-                            local top_y = math.min(py1, py2) - 25; if ref_gy < 0 then top_y = math.max(py1, py2) + 25 end
+                            -- Bezugslinie ueber (bzw. unter) dem ganzen Stab, beim Bogen ueber dem Scheitel
+                            local y_min, y_max = math.min(py1, py2), math.max(py1, py2)
+                            for j = 1, steps - 1 do local _, ay = achse(j / steps); y_min, y_max = math.min(y_min, ay), math.max(y_max, ay) end
+                            local top_y = y_min - 25; if ref_gy < 0 then top_y = y_max + 25 end
                             gc:drawLine(px1, py1, px1, top_y); gc:drawLine(px2, py2, px2, top_y)
                             local env_pts = {}
                             for j = 0, steps do
                                 local t = j/steps; local gy_val = has_cas_gy and (s.gy_pts and s.gy_pts[j+1] or 0) or s.gy
                                 local dir = gy_val > 0 and -1 or 1
                                 local h_curr = math.abs(gy_val) * scale_gy * dir
-                                local tailX, tailY = px1 + dx*t, top_y + h_curr
+                                local ax = achse(t)
+                                local tailX, tailY = ax, top_y + h_curr
                                 table.insert(env_pts, tailX); table.insert(env_pts, tailY)
-                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, px1 + dx*t, top_y, LASTPFEIL_KOPF) end
+                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, ax, top_y, LASTPFEIL_KOPF) end
                             end
                             gc:setPen("thin", "smooth"); gc:drawPolyLine(env_pts); gc:drawLine(px1, top_y, px2, top_y)
                         else
@@ -7353,9 +8845,10 @@ function on.paint(gc)
                                 local t = j/steps; local gy_val = has_cas_gy and (s.gy_pts and s.gy_pts[j+1] or 0) or s.gy
                                 local dir = gy_val > 0 and -1 or 1
                                 local h_curr = math.abs(gy_val) * scale_gy * dir
-                                local tailX, tailY = px1 + dx*t, py1 + dy*t + h_curr
+                                local ax, ay = achse(t)
+                                local tailX, tailY = ax, ay + h_curr
                                 table.insert(env_pts, tailX); table.insert(env_pts, tailY)
-                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, px1 + dx*t, py1 + dy*t, LASTPFEIL_KOPF) end
+                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, ax, ay, LASTPFEIL_KOPF) end
                             end
                             gc:setPen("thin", "smooth"); gc:drawPolyLine(env_pts)
                         end
@@ -7364,7 +8857,7 @@ function on.paint(gc)
 
                 local has_cas_gx = s.gx_str and string.hasx(s.gx_str)
                 local has_classic_gx = (s.gx or 0) ~= 0
-                if zeigeResultierende and (has_classic_gx or has_cas_gx) then
+                if resGerade and (has_classic_gx or has_cas_gx) then
                     local dx_m, dy_m = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
                     local L_phys = math.sqrt(dx_m^2 + dy_m^2)
                     local L_eff = s.gx_proj and math.abs(dy_m) or L_phys
@@ -7383,7 +8876,7 @@ function on.paint(gc)
                             px_res + (resPfeil + 5) * dir + 5, py_res - 10)
                         merkeResultierende(knoten[s.k1].x + ux * x_res, knoten[s.k1].y + uy * x_res)
                     end
-                elseif has_classic_gx or has_cas_gx then
+                elseif not zeigeResultierende and (has_classic_gx or has_cas_gx) then
                     local steps = 10
                     local max_gx = 0
                     if has_cas_gx and s.gx_pts then
@@ -7395,16 +8888,20 @@ function on.paint(gc)
                         local scale_gx = 20 / max_gx
                         if s.gx_proj then
                             local ref_gx = has_cas_gx and (s.gx_pts and s.gx_pts[1] or 0) or s.gx
-                            local side_x = math.min(px1, px2) - 25; if ref_gx < 0 then side_x = math.max(px1, px2) + 25 end
+                            -- Bezugslinie links (bzw. rechts) neben dem ganzen Stab, beim Bogen neben seinem Scheitel
+                            local x_min, x_max = math.min(px1, px2), math.max(px1, px2)
+                            for j = 1, steps - 1 do local ax = achse(j / steps); x_min, x_max = math.min(x_min, ax), math.max(x_max, ax) end
+                            local side_x = x_min - 25; if ref_gx < 0 then side_x = x_max + 25 end
                             gc:drawLine(px1, py1, side_x, py1); gc:drawLine(px2, py2, side_x, py2)
                             local env_pts = {}
                             for j = 0, steps do
                                 local t = j/steps; local gx_val = has_cas_gx and (s.gx_pts and s.gx_pts[j+1] or 0) or s.gx
                                 local dir = gx_val > 0 and -1 or 1
                                 local h_curr = math.abs(gx_val) * scale_gx * dir
-                                local tailX, tailY = side_x + h_curr, py1 + dy*t
+                                local _, ay = achse(t)
+                                local tailX, tailY = side_x + h_curr, ay
                                 table.insert(env_pts, tailX); table.insert(env_pts, tailY)
-                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, side_x, py1 + dy*t, LASTPFEIL_KOPF) end
+                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, side_x, ay, LASTPFEIL_KOPF) end
                             end
                             gc:setPen("thin", "smooth"); gc:drawPolyLine(env_pts); gc:drawLine(side_x, py1, side_x, py2)
                         else
@@ -7413,9 +8910,10 @@ function on.paint(gc)
                                 local t = j/steps; local gx_val = has_cas_gx and (s.gx_pts and s.gx_pts[j+1] or 0) or s.gx
                                 local dir = gx_val > 0 and -1 or 1
                                 local h_curr = math.abs(gx_val) * scale_gx * dir
-                                local tailX, tailY = px1 + dx*t + h_curr, py1 + dy*t
+                                local ax, ay = achse(t)
+                                local tailX, tailY = ax + h_curr, ay
                                 table.insert(env_pts, tailX); table.insert(env_pts, tailY)
-                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, px1 + dx*t, py1 + dy*t, LASTPFEIL_KOPF) end
+                                if math.abs(h_curr) > 0.5 then drawArrow(gc, tailX, tailY, ax, ay, LASTPFEIL_KOPF) end
                             end
                             gc:setPen("thin", "smooth"); gc:drawPolyLine(env_pts)
                         end
@@ -7426,7 +8924,7 @@ function on.paint(gc)
                 local has_classic_q = (s.q + s.q_A ~= 0) or (s.q + s.q_B ~= 0)
                 local has_cas_q = (s.q_pts and #s.q_pts == 11)
 
-                if zeigeResultierende and (has_classic_q or has_cas_q) then
+                if resGerade and (has_classic_q or has_cas_q) then
                     local dx_m, dy_m = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
                     local L_phys = math.sqrt(dx_m^2 + dy_m^2)
                     local qA = s.q + (s.q_A or 0); local qB = s.q + (s.q_B or 0)
@@ -7442,7 +8940,7 @@ function on.paint(gc)
                             px_res - nx * (resPfeil + 5) * vz - 10, py_res - ny * (resPfeil + 5) * vz - 10)
                         merkeResultierende(knoten[s.k1].x + ux * x_res, knoten[s.k1].y + uy * x_res)
                     end
-                elseif has_classic_q or has_cas_q then
+                elseif not zeigeResultierende and (has_classic_q or has_cas_q) then
                     local combined_q = {}; local max_abs_q = 0
                     for j = 0, 10 do
                         local t = j / 10; local q_class = (s.q + s.q_A)*(1-t) + (s.q + s.q_B)*t
@@ -7455,9 +8953,9 @@ function on.paint(gc)
                         local scale_q = 25 / max_abs_q; local pts_env = {}
                         for j = 0, 10 do
                             local t = j / 10; local h_curr = -combined_q[j+1] * scale_q
-                            local fx, fy = px1 + dx*t, py1 + dy*t
-                            table.insert(pts_env, fx + nx*h_curr); table.insert(pts_env, fy + ny*h_curr)
-                            if math.abs(h_curr) > 0.5 then drawArrow(gc, fx + nx*h_curr, fy + ny*h_curr, fx, fy, LASTPFEIL_KOPF) end
+                            local fx, fy, _, _, qnx, qny = achse(t)
+                            table.insert(pts_env, fx + qnx*h_curr); table.insert(pts_env, fy + qny*h_curr)
+                            if math.abs(h_curr) > 0.5 then drawArrow(gc, fx + qnx*h_curr, fy + qny*h_curr, fx, fy, LASTPFEIL_KOPF) end
                         end
                         gc:setPen("thin", "smooth"); gc:drawPolyLine(pts_env)
                         gc:drawLine(px1, py1, pts_env[1], pts_env[2]); gc:drawLine(px2, py2, pts_env[#pts_env-1], pts_env[#pts_env])
@@ -7468,7 +8966,7 @@ function on.paint(gc)
                 local has_classic_n = (s.n + s.n_A ~= 0) or (s.n + s.n_B ~= 0)
                 local has_cas_n = (s.n_pts and #s.n_pts == 11)
 
-                if zeigeResultierende and (has_classic_n or has_cas_n) then
+                if resGerade and (has_classic_n or has_cas_n) then
                     local dx_m, dy_m = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
                     local L_phys = math.sqrt(dx_m^2 + dy_m^2)
                     local nA = s.n + (s.n_A or 0); local nB = s.n + (s.n_B or 0)
@@ -7484,7 +8982,7 @@ function on.paint(gc)
                             px_res - ux * (resPfeil + 5) * vz + 5, py_res - uy * (resPfeil + 5) * vz - 10)
                         merkeResultierende(knoten[s.k1].x + ux * x_res, knoten[s.k1].y + uy * x_res)
                     end
-                elseif has_classic_n or has_cas_n then
+                elseif not zeigeResultierende and (has_classic_n or has_cas_n) then
                     local combined_n = {}; local max_abs_n = 0
                     for j = 0, 10 do
                         local t = j / 10; local n_class = (s.n + s.n_A)*(1-t) + (s.n + s.n_B)*t
@@ -7495,12 +8993,23 @@ function on.paint(gc)
                     end
 
                     if max_abs_n > 0 then
-                        local dist = 14; gc:drawLine(px1 + nx*dist, py1 + ny*dist, px2 + nx*dist, py2 + ny*dist)
+                        local dist = 14
+                        if gb then
+                            local linie = {}
+                            for j = 0, 10 do
+                                local ax, ay, _, _, anx, any = achse(j / 10)
+                                linie[#linie + 1] = ax + anx*dist; linie[#linie + 1] = ay + any*dist
+                            end
+                            gc:drawPolyLine(linie)
+                        else
+                            gc:drawLine(px1 + nx*dist, py1 + ny*dist, px2 + nx*dist, py2 + ny*dist)
+                        end
                         for j = 0, 10, 2 do
-                            local t = j/10; local n_curr = combined_n[j+1]; local fx, fy = px1 + dx*t + nx*dist, py1 + dy*t + ny*dist
+                            local ax, ay, aux, auy, anx, any = achse(j/10)
+                            local n_curr = combined_n[j+1]; local fx, fy = ax + anx*dist, ay + any*dist
                             if math.abs(n_curr) > 0.5 then
                                 local arr_len = (n_curr/max_abs_n)*12
-                                drawArrow(gc, fx - (dx/L)*arr_len, fy - (dy/L)*arr_len, fx + (dx/L)*arr_len, fy + (dy/L)*arr_len, LASTPFEIL_KOPF)
+                                drawArrow(gc, fx - aux*arr_len, fy - auy*arr_len, fx + aux*arr_len, fy + auy*arr_len, LASTPFEIL_KOPF)
                             end
                         end
                         
@@ -7510,7 +9019,7 @@ function on.paint(gc)
                 local has_classic_m = (s.m ~= 0)
                 local has_cas_m = (s.m_pts and #s.m_pts == 11)
 
-                if zeigeResultierende and (has_classic_m or has_cas_m) then
+                if resGerade and (has_classic_m or has_cas_m) then
                     local dx_m, dy_m = knoten[s.k2].x - knoten[s.k1].x, knoten[s.k2].y - knoten[s.k1].y
                     local L_phys = math.sqrt(dx_m^2 + dy_m^2)
                     local m0 = s.m or 0
@@ -7527,7 +9036,7 @@ function on.paint(gc)
                         end
                         gc:drawString(lbl, pxm + 15, pym - 10)
                     end
-                elseif has_classic_m or has_cas_m then
+                elseif not zeigeResultierende and (has_classic_m or has_cas_m) then
                     local combined_m = {}; local max_abs_m = 0
                     for j = 0, 10 do
                         local m_class = s.m; local m_c = (has_cas_m and s.m_pts[j+1]) or 0; local m_tot = m_class + m_c
@@ -7536,7 +9045,7 @@ function on.paint(gc)
                     end
                     if max_abs_m > 0 then
                         for j = 1, 9, 2 do
-                            local t = j/10; local m_curr = combined_m[j+1]; local fx, fy = px1 + dx*t, py1 + dy*t
+                            local t = j/10; local m_curr = combined_m[j+1]; local fx, fy = achse(t)
                             if math.abs(m_curr) > 0.5 then drawMoment(gc, fx, fy, 8, m_curr < 0) end
                         end
                         
@@ -7614,8 +9123,14 @@ function on.paint(gc)
                             if j == 0 then val = pd_right.M1
                             elseif j == num_seg then val = pd_left.M2
                             else val = (pd_left.M2 + pd_right.M1) / 2 end
-                        elseif ansichtsModus == "N" then val = (pd_left.N + pd_right.N) / 2
-                        elseif ansichtsModus == "Q" then val = (pd_left.Q + pd_right.Q) / 2 end
+                        else
+                            -- Endwert des linken und Anfangswert des rechten Teilstuecks (mit Bogenlast verschieden)
+                            local f = ansichtsModus == "N" and "N" or "Q"
+                            local links = pd_left[f .. "2"] or pd_left[f]
+                            if j == 0 then val = pd_right[f]
+                            elseif j == num_seg then val = links
+                            else val = (links + pd_right[f]) / 2 end
+                        end
                         local dist = val * drawScale
                         px_val = ax + nx_t * dist
                         py_val = ay + ny_t * dist
@@ -7679,7 +9194,7 @@ function on.paint(gc)
                     local pd_first = s.arc_plot_data[1]
                     local pd_last = s.arc_plot_data[num_seg]
                     local v_start = (ansichtsModus == "N" and pd_first.N) or (ansichtsModus == "Q" and pd_first.Q) or (pd_first.M1)
-                    local v_end = (ansichtsModus == "N" and pd_last.N) or (ansichtsModus == "Q" and pd_last.Q) or (pd_last.M2)
+                    local v_end = (ansichtsModus == "N" and (pd_last.N2 or pd_last.N)) or (ansichtsModus == "Q" and (pd_last.Q2 or pd_last.Q)) or (pd_last.M2)
                     
                     gc:setFont("sansserif", "r", 8); gc:setColorRGB(0, 0, 0)
                     if schnittAnzeigeModus ~= "Hover" then
@@ -7712,9 +9227,16 @@ function on.paint(gc)
                 end
                 
                 if (ansichtsModus == "M" or ansichtsModus == "N" or ansichtsModus == "Q") then
+                    -- Wert am Teilungspunkt idx-1 (Anfang von Teilstueck idx; letzter Punkt: Ende des letzten)
                     local function get_arc_val(idx)
                         local pd = s.arc_plot_data[idx]
-                        if not pd then return 0 end
+                        if not pd then
+                            pd = s.arc_plot_data[idx - 1]
+                            if not pd then return 0 end
+                            if ansichtsModus == "N" then return pd.N2 or pd.N
+                            elseif ansichtsModus == "Q" then return pd.Q2 or pd.Q end
+                            return pd.M2
+                        end
                         if ansichtsModus == "N" then return pd.N
                         elseif ansichtsModus == "Q" then return pd.Q
                         elseif ansichtsModus == "M" then return pd.M1 end
@@ -7752,8 +9274,10 @@ function on.paint(gc)
                             local h_px = poly_pts[best_idx*2 - 1]
                             local h_py = poly_pts[best_idx*2]
                             local h_val = get_arc_val(best_idx)
-                            local t_m = best_idx / n_pts
-                            local h_x = t_m * math.abs(s.bogen_alpha or 1) * math.abs(s.bogen_r or 1)
+                            -- Bogenlaenge bis zum Teilungspunkt (Winkel aus der Rechnung)
+                            local pd_h = s.arc_plot_data[best_idx]
+                            local phi_h = pd_h and pd_h.phi1 or s.bogen_alpha or 0
+                            local h_x = math.abs(phi_h) * math.abs(s.bogen_r or 1)
                             gc:setColorRGB(255, 0, 0)
                             gc:fillArc(h_px - 3, h_py - 3, 7, 7, 0, 360)
                             gc:setColorRGB(255, 255, 220); gc:fillRect(h_px, h_py, 100, 16)
@@ -7797,7 +9321,8 @@ function on.paint(gc)
                         val = (val_homogen_EI + v_part_class_EI + v_part_cas_EI) / EI
                     end
 
-                    if math.abs(val) < 1e-5 then val = 0 end
+                    -- wie oben: Verschiebungen (in m) erst unter 1e-12 auf null, sonst Knick bei 0,01 mm
+                    if math.abs(val) < (((ansichtsModus == "W" or ansichtsModus == "U") and 1e-12) or 1e-5) then val = 0 end
                     local dist = val * drawScale
                     local cur_px = px1 + dx*t + nx*dist
                     local cur_py = py1 + dy*t + ny*dist
@@ -7932,7 +9457,8 @@ function on.paint(gc)
                 
                 local lbl
                 if explosionPage == 2 then
-                    lbl = symbolischer_modus and (s.symb_N_start and fm(s.symb_N_start) or "S"..i) or "S_"..i
+                    lbl = "S_" .. i
+                    e2Pfeil(lbl, ux, uy); e2Pfeil(lbl, -ux, -uy)
                 else
                     if symbolischer_modus and s.symb_N_start then
                         local s_str = fm(s.symb_N_start)
@@ -7961,6 +9487,17 @@ function on.paint(gc)
                 break
             end
             
+            -- Knotenlast global (y nach unten), wie in der Berechnung um -last_w gedreht
+            local function knotenlastGlobal(kn)
+                local r = math.rad(-(kn.last_w or 0))
+                local c, sn = math.cos(r), math.sin(r)
+                return (kn.last_x or 0) * c - (kn.last_y or 0) * sn, (kn.last_x or 0) * sn + (kn.last_y or 0) * c
+            end
+            local function lastLabel(kn, wert, text)
+                if symbolischer_modus and (kn.last_w or 0) == 0 and text then return "F = " .. fm(text) end
+                return "F = " .. formatLabel(math.abs(wert))
+            end
+
             local function isRigidNodeInTS(node_idx, ts)
                 if not ts then return true end
                 for _idx, st in ipairs(staebe) do
@@ -8008,7 +9545,7 @@ function on.paint(gc)
             local nodeA_in_ts = (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts) or isRigidNodeInTS(s.k1, hovered_ts))
             if explodeA and not loadApplied[s.k1] then
                 local kn = knoten[s.k1]
-                offsetX_A = kn.last_x; offsetY_A = kn.last_y; offsetM_A = kn.last_m
+                offsetX_A, offsetY_A = knotenlastGlobal(kn); offsetM_A = kn.last_m
                 local isSupp = kn.lager_x or kn.lager_y or kn.lager_m or kn.cx > 0 or kn.cy > 0 or kn.cm > 0
                 offsetRx_A = isSupp and kn.Rx_glob or 0; offsetRy_A = isSupp and kn.Ry_glob or 0; offsetRm_A = isSupp and kn.Rm_glob or 0
                 if nodeA_in_ts then
@@ -8016,7 +9553,7 @@ function on.paint(gc)
                 end
             elseif explodeA then
                 local kn = knoten[s.k1]
-                offsetX_A = kn.last_x; offsetY_A = kn.last_y; offsetM_A = kn.last_m
+                offsetX_A, offsetY_A = knotenlastGlobal(kn); offsetM_A = kn.last_m
                 local isSupp = kn.lager_x or kn.lager_y or kn.lager_m or kn.cx > 0 or kn.cy > 0 or kn.cm > 0
                 offsetRx_A = isSupp and kn.Rx_glob or 0; offsetRy_A = isSupp and kn.Ry_glob or 0; offsetRm_A = isSupp and kn.Rm_glob or 0
             end
@@ -8024,7 +9561,7 @@ function on.paint(gc)
             local nodeB_in_ts = (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts) or isRigidNodeInTS(s.k2, hovered_ts))
             if explodeB and not loadApplied[s.k2] then
                 local kn = knoten[s.k2]
-                offsetX_B = kn.last_x; offsetY_B = kn.last_y; offsetM_B = kn.last_m
+                offsetX_B, offsetY_B = knotenlastGlobal(kn); offsetM_B = kn.last_m
                 local isSupp = kn.lager_x or kn.lager_y or kn.lager_m or kn.cx > 0 or kn.cy > 0 or kn.cm > 0
                 offsetRx_B = isSupp and kn.Rx_glob or 0; offsetRy_B = isSupp and kn.Ry_glob or 0; offsetRm_B = isSupp and kn.Rm_glob or 0
                 if nodeB_in_ts then
@@ -8032,7 +9569,7 @@ function on.paint(gc)
                 end
             elseif explodeB then
                 local kn = knoten[s.k2]
-                offsetX_B = kn.last_x; offsetY_B = kn.last_y; offsetM_B = kn.last_m
+                offsetX_B, offsetY_B = knotenlastGlobal(kn); offsetM_B = kn.last_m
                 local isSupp = kn.lager_x or kn.lager_y or kn.lager_m or kn.cx > 0 or kn.cy > 0 or kn.cm > 0
                 offsetRx_B = isSupp and kn.Rx_glob or 0; offsetRy_B = isSupp and kn.Ry_glob or 0; offsetRm_B = isSupp and kn.Rm_glob or 0
             end
@@ -8079,63 +9616,18 @@ function on.paint(gc)
                 s_Fy_b = s.symb_Fy_b or s.symb_Q_end
             end
 
-            local function getNumTS(node_idx)
-                local ang_count, rigid_count = 0, 0
-                if knoten[node_idx].gelenk then
-                    local count = 0
-                    for _, ts in ipairs(staebe) do
-                        if not ts.is_cut and (ts.k1 == node_idx or ts.k2 == node_idx) then count = count + 1 end
-                    end
-                    return count
-                else
-                    for _, ts in ipairs(staebe) do
-                        if not ts.is_cut then
-                            if ts.k1 == node_idx then
-                                if ts.gelenk_A or ts.n_gelenk_A or ts.q_gelenk_A then ang_count = ang_count + 1 else rigid_count = rigid_count + 1 end
-                            elseif ts.k2 == node_idx then
-                                if ts.gelenk_B or ts.n_gelenk_B or ts.q_gelenk_B then ang_count = ang_count + 1 else rigid_count = rigid_count + 1 end
-                            end
-                        end
-                    end
-                    return ang_count + (rigid_count > 0 and 1 or 0)
-                end
-            end
+            local function getNumTS(node_idx) return gelenkKnoten(node_idx).numTS end
             local lblSuffixA = getNumTS(s.k1) > 2 and ("s"..(s.ts_scheibe or i)) or ""
             local lblSuffixB = getNumTS(s.k2) > 2 and ("s"..(s.ts_scheibe or i)) or ""
+            -- Richtung der Gelenkgroessen wie im LGS-Export (gelenkRichtung), bezogen auf die
+            -- Grundrichtung der Zeichnung (Stabanfang -1, Stabende +1)
             local function getFlipMultiplier(node_idx, s_idx)
-                if knoten[node_idx].gelenk then
-                    return 1
-                end
-
-                local r1
-                local conn = {}
-                for j, ts in ipairs(staebe) do
-                    if ts.k1 == node_idx or ts.k2 == node_idx then table.insert(conn, j) end
-                end
-                
-                for _, j in ipairs(conn) do
-                    local ts = staebe[j]
-                    if (ts.k1 == node_idx and (ts.gelenk_A or ts.n_gelenk_A or ts.q_gelenk_A)) or
-                       (ts.k2 == node_idx and (ts.gelenk_B or ts.n_gelenk_B or ts.q_gelenk_B)) then
-                        r1 = j
-                        break
-                    end
-                end
-                
-                if not r1 or s_idx == r1 then
-                    return 1
-                end
-                
-                local r1_is_k1 = (staebe[r1].k1 == node_idx)
-                local s_is_k1 = (staebe[s_idx].k1 == node_idx)
-                
-                if r1_is_k1 == s_is_k1 then
-                    return -1
-                else
-                    return 1
-                end
+                local e = (staebe[s_idx].k1 == node_idx) and -1 or 1
+                return gelenkRichtung(node_idx, s_idx) * e
             end
-            
+            -- Gelenkgroessen nur, wenn am Knoten mindestens zwei Teilsysteme zusammenkommen
+            local mehrA, mehrB = getNumTS(s.k1) > 1, getNumTS(s.k2) > 1
+
             local flipA = getFlipMultiplier(s.k1, i)
             local flipB = getFlipMultiplier(s.k2, i)
             local isHingeA = s.n_gelenk_A or s.q_gelenk_A or s.gelenk_A or knoten[s.k1].gelenk
@@ -8146,11 +9638,11 @@ function on.paint(gc)
 
             if explodeA and (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts) or isRigidNodeInTS(s.k1, hovered_ts)) then
                 local val_N, val_Q, val_h, val_v
-                if not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts) then
+                if mehrA and (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts)) then
                     if useLocalA then
                         val_N = -N_a_proj; val_Q = -V_a_proj
-                        if not s.n_gelenk_A then drawFBDArrow(gc, val_N, -ux, -uy, px1, py1, prefixN_A, nil, symbolischer_modus and fm(s.symb_N_start) or nil, explosionPage == 2) end
-                        if not s.q_gelenk_A then drawFBDArrow(gc, val_Q, -nx, -ny, px1, py1, prefixQ_A, nil, symbolischer_modus and fm(s.symb_Q_start) or nil, explosionPage == 2) end
+                        if not s.n_gelenk_A then drawFBDArrow(gc, val_N, -ux, -uy, px1, py1, prefixN_A, nil, symbolischer_modus and fm(s.symb_N_start) or nil, explosionPage == 2, flipA) end
+                        if not s.q_gelenk_A then drawFBDArrow(gc, val_Q, -nx, -ny, px1, py1, prefixQ_A, nil, symbolischer_modus and fm(s.symb_Q_start) or nil, explosionPage == 2, flipA) end
                     else
                         val_h = -Fx_a; val_v = -Fy_a
                         drawFBDArrow(gc, val_h, -1, 0, px1, py1, "h = ", "Gx_"..getHingeNumber(s.k1)..lblSuffixA, symbolischer_modus and fm(s_Fx_a) or nil, explosionPage == 2, flipA)
@@ -8160,7 +9652,9 @@ function on.paint(gc)
                     if not isMHingeA then
                         if math.abs(M_a_disp) > 1e-4 or explosionPage == 2 then
                             if autoKGV and KGV_Zustand > 0 then gc:setColorRGB(200, 0, 200) else gc:setColorRGB(0, 150, 0) end
-                            gc:setPen("thin", "smooth"); drawMoment(gc, px1, py1, 16, M_a_disp > 0)
+                            local cw = M_a_disp > 0
+                            if explosionPage == 2 then cw = flipA > 0; e2Moment(prefixM_A:gsub(" = ", ""), cw) end
+                            gc:setPen("thin", "smooth"); drawMoment(gc, px1, py1, 16, cw)
                             gc:setFont("sansserif", "r", 10)
                             local label_m
                             if explosionPage == 2 then
@@ -8181,8 +9675,9 @@ function on.paint(gc)
                         if fachwerkModus and explosionPage == 2 then
                             drawReactionArrow(gc, -N_a_proj, ux, uy, px1, py1, "S" .. i, "S" .. i)
                         else
-                            if offsetX_A ~= 0 then local d = offsetX_A > 0 and 1 or -1; drawReactionArrow(gc, offsetX_A, 1, 0, px1, py1, "G"..s.k1.."_h", "G"..s.k1.."_h", symbolischer_modus and fm(knoten[s.k1].x_str) or nil) end
-                            if offsetY_A ~= 0 then local d = offsetY_A > 0 and 1 or -1; drawReactionArrow(gc, offsetY_A, 0, 1, px1, py1, "G"..s.k1.."_v", "G"..s.k1.."_v", symbolischer_modus and fm(knoten[s.k1].y_str) or nil) end
+                            local kn_l = knoten[s.k1]
+                            if offsetX_A ~= 0 then local lbl = lastLabel(kn_l, offsetX_A, kn_l.last_x_str); drawReactionArrow(gc, offsetX_A, 1, 0, px1, py1, "F = ", lbl, lbl:sub(5)) end
+                            if offsetY_A ~= 0 then local lbl = lastLabel(kn_l, offsetY_A, kn_l.last_y_str); drawReactionArrow(gc, offsetY_A, 0, 1, px1, py1, "F = ", lbl, lbl:sub(5)) end
                         end
                         if offsetM_A ~= 0 then drawMoment(gc, px1, py1, 24, offsetM_A < 0) end
                     end
@@ -8191,23 +9686,24 @@ function on.paint(gc)
                         local kn = knoten[s.k1]
                         local r = math.rad(kn.winkel or 0)
                         local cw, sw = math.cos(r), math.sin(r)
-                        if math.abs(kn.R_xi) > 1e-4 or (explosionPage == 2 and (kn.lager_x or (kn.cx and kn.cx > 0))) then drawReactionArrow(gc, kn.R_xi, cw, -sw, px1, py1, "H = ", string.char(64 + s.k1).."_h", symbolischer_modus and fm(kn.symb_R_xi) or nil, explosionPage == 2) end
-                        if math.abs(kn.R_eta) > 1e-4 or (explosionPage == 2 and (kn.lager_y or (kn.cy and kn.cy > 0))) then drawReactionArrow(gc, kn.R_eta, -sw, -cw, px1, py1, "V = ", string.char(64 + s.k1).."_v", symbolischer_modus and fm(kn.symb_R_eta) or nil, explosionPage == 2) end
+                        if math.abs(kn.R_xi) > 1e-4 or (explosionPage == 2 and (kn.lager_x or (kn.cx and kn.cx > 0))) then drawReactionArrow(gc, kn.R_xi, cw, -sw, px1, py1, "H = ", getSuppLetter(s.k1).."_h", symbolischer_modus and fm(kn.symb_R_xi) or nil, explosionPage == 2) end
+                        if math.abs(kn.R_eta) > 1e-4 or (explosionPage == 2 and (kn.lager_y or (kn.cy and kn.cy > 0))) then drawReactionArrow(gc, kn.R_eta, -sw, -cw, px1, py1, "V = ", getSuppLetter(s.k1).."_v", symbolischer_modus and fm(kn.symb_R_eta) or nil, explosionPage == 2) end
                         if math.abs(offsetRm_A) > 1e-4 or (explosionPage == 2 and (kn.lager_m or (kn.cm and kn.cm > 0))) then
                             if autoKGV and KGV_Zustand > 0 then gc:setColorRGB(200, 0, 200) else gc:setColorRGB(0, 0, 255) end
-                            gc:setPen("thin", "smooth"); drawMoment(gc, px1, py1, 28, offsetRm_A < 0)
-                            gc:setFont("sansserif", "r", 8); gc:drawString("M = " .. formatLabel(math.abs(offsetRm_A)), px1 + 22, py1 + 22)
+                            local cw = offsetRm_A < 0
+                            local m_lbl = "M = " .. formatLabel(math.abs(offsetRm_A))
+                            if explosionPage == 2 then cw = false; m_lbl = "M_" .. getSuppLetter(s.k1); e2Moment(m_lbl, cw) end
+                            gc:setPen("thin", "smooth"); drawMoment(gc, px1, py1, 28, cw)
+                            gc:setFont("sansserif", "r", 8); gc:drawString(m_lbl, px1 + 22, py1 + 22)
                         end
                     end
                 end
 
+                -- Gegenseite am Knoten nur, wenn dort ein biegesteifer Rest haengt (sonst zeichnet sie der
+                -- andere Gelenkstab bzw. sie gehoert zum Gelenkbolzen)
                 local should_draw_A = false
-                if not knoten[s.k1].gelenk then
-                    if explodeA and not is_only_rod_A then
-                        should_draw_A = (not hovered_ts or isRigidNodeInTS(s.k1, hovered_ts))
-                    else
-                        should_draw_A = (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts))
-                    end
+                if not knoten[s.k1].gelenk and #gelenkKnoten(s.k1).R > 0 and mehrA then
+                    should_draw_A = (not hovered_ts or isRigidNodeInTS(s.k1, hovered_ts))
                 end
                 
                 if should_draw_A then
@@ -8227,7 +9723,9 @@ function on.paint(gc)
                     if not s.gelenk_A then
                         if math.abs(M_a_disp) > 1e-4 or explosionPage == 2 then
                             if autoKGV and KGV_Zustand > 0 then gc:setColorRGB(200, 0, 200) else gc:setColorRGB(0, 150, 0) end
-                            gc:setPen("thin", "smooth"); drawMoment(gc, draw_orig_px1, draw_orig_py1, 16, M_a_disp <= 0)
+                            local cw = M_a_disp <= 0
+                            if explosionPage == 2 then cw = flipA < 0; e2Moment(prefixM_A:gsub(" = ", ""), cw) end
+                            gc:setPen("thin", "smooth"); drawMoment(gc, draw_orig_px1, draw_orig_py1, 16, cw)
                             gc:setFont("sansserif", "r", 10)
                             local label_m
                             if explosionPage == 2 then
@@ -8249,11 +9747,11 @@ function on.paint(gc)
             local isMHingeB = knoten[s.k2].gelenk or s.gelenk_B
             if explodeB and (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts) or isRigidNodeInTS(s.k2, hovered_ts)) then
                 local val_N, val_Q, val_h, val_v
-                if not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts) then
+                if mehrB and (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts)) then
                     if useLocalB then
                         val_N = N_b_proj; val_Q = V_b_proj
-                        if not s.n_gelenk_B then drawFBDArrow(gc, val_N, ux, uy, px2, py2, prefixN_B, nil, symbolischer_modus and fm(s.symb_N_end) or nil, explosionPage == 2) end
-                        if not s.q_gelenk_B then drawFBDArrow(gc, val_Q, nx, ny, px2, py2, prefixQ_B, nil, symbolischer_modus and fm(s.symb_Q_end) or nil, explosionPage == 2) end
+                        if not s.n_gelenk_B then drawFBDArrow(gc, val_N, ux, uy, px2, py2, prefixN_B, nil, symbolischer_modus and fm(s.symb_N_end) or nil, explosionPage == 2, flipB) end
+                        if not s.q_gelenk_B then drawFBDArrow(gc, val_Q, nx, ny, px2, py2, prefixQ_B, nil, symbolischer_modus and fm(s.symb_Q_end) or nil, explosionPage == 2, flipB) end
                     else
                         val_h = Fx_b; val_v = Fy_b
                         drawFBDArrow(gc, val_h, 1, 0, px2, py2, "h = ", "Gx_"..getHingeNumber(s.k2)..lblSuffixB, symbolischer_modus and fm(s_Fx_b) or nil, explosionPage == 2, flipB)
@@ -8263,7 +9761,9 @@ function on.paint(gc)
                     if not isMHingeB then
                         if math.abs(M_b_disp) > 1e-4 or explosionPage == 2 then
                             if autoKGV and KGV_Zustand > 0 then gc:setColorRGB(200, 0, 200) else gc:setColorRGB(0, 150, 0) end
-                            gc:setPen("thin", "smooth"); drawMoment(gc, px2, py2, 16, M_b_disp < 0)
+                            local cw = M_b_disp < 0
+                            if explosionPage == 2 then cw = flipB < 0; e2Moment(prefixM_B:gsub(" = ", ""), cw) end
+                            gc:setPen("thin", "smooth"); drawMoment(gc, px2, py2, 16, cw)
                             gc:setFont("sansserif", "r", 10)
                             local label_m
                             if explosionPage == 2 then
@@ -8284,8 +9784,9 @@ function on.paint(gc)
                         if fachwerkModus and explosionPage == 2 then
                             drawReactionArrow(gc, -N_b_proj, ux, uy, px2, py2, "S" .. i, "S" .. i)
                         else
-                            if offsetX_B ~= 0 then local d = offsetX_B > 0 and 1 or -1; drawReactionArrow(gc, offsetX_B, 1, 0, px2, py2, "G"..s.k2.."_h", "G"..s.k2.."_h", symbolischer_modus and fm(knoten[s.k2].x_str) or nil) end
-                            if offsetY_B ~= 0 then local d = offsetY_B > 0 and 1 or -1; drawReactionArrow(gc, offsetY_B, 0, 1, px2, py2, "G"..s.k2.."_v", "G"..s.k2.."_v", symbolischer_modus and fm(knoten[s.k2].y_str) or nil) end
+                            local kn_l = knoten[s.k2]
+                            if offsetX_B ~= 0 then local lbl = lastLabel(kn_l, offsetX_B, kn_l.last_x_str); drawReactionArrow(gc, offsetX_B, 1, 0, px2, py2, "F = ", lbl, lbl:sub(5)) end
+                            if offsetY_B ~= 0 then local lbl = lastLabel(kn_l, offsetY_B, kn_l.last_y_str); drawReactionArrow(gc, offsetY_B, 0, 1, px2, py2, "F = ", lbl, lbl:sub(5)) end
                         end
                         if offsetM_B ~= 0 then drawMoment(gc, px2, py2, 24, offsetM_B < 0) end
                     end
@@ -8294,23 +9795,24 @@ function on.paint(gc)
                         local kn = knoten[s.k2]
                         local r = math.rad(kn.winkel or 0)
                         local cw, sw = math.cos(r), math.sin(r)
-                        if math.abs(kn.R_xi) > 1e-4 or (explosionPage == 2 and (kn.lager_x or (kn.cx and kn.cx > 0))) then drawReactionArrow(gc, kn.R_xi, cw, -sw, px2, py2, "H = ", string.char(64 + s.k2).."_h", symbolischer_modus and fm(kn.symb_R_xi) or nil, explosionPage == 2) end
-                        if math.abs(kn.R_eta) > 1e-4 or (explosionPage == 2 and (kn.lager_y or (kn.cy and kn.cy > 0))) then drawReactionArrow(gc, kn.R_eta, -sw, -cw, px2, py2, "V = ", string.char(64 + s.k2).."_v", symbolischer_modus and fm(kn.symb_R_eta) or nil, explosionPage == 2) end
+                        if math.abs(kn.R_xi) > 1e-4 or (explosionPage == 2 and (kn.lager_x or (kn.cx and kn.cx > 0))) then drawReactionArrow(gc, kn.R_xi, cw, -sw, px2, py2, "H = ", getSuppLetter(s.k2).."_h", symbolischer_modus and fm(kn.symb_R_xi) or nil, explosionPage == 2) end
+                        if math.abs(kn.R_eta) > 1e-4 or (explosionPage == 2 and (kn.lager_y or (kn.cy and kn.cy > 0))) then drawReactionArrow(gc, kn.R_eta, -sw, -cw, px2, py2, "V = ", getSuppLetter(s.k2).."_v", symbolischer_modus and fm(kn.symb_R_eta) or nil, explosionPage == 2) end
                         if math.abs(offsetRm_B) > 1e-4 or (explosionPage == 2 and (kn.lager_m or (kn.cm and kn.cm > 0))) then
                             if autoKGV and KGV_Zustand > 0 then gc:setColorRGB(200, 0, 200) else gc:setColorRGB(0, 0, 255) end
-                            gc:setPen("thin", "smooth"); drawMoment(gc, px2, py2, 28, offsetRm_B < 0)
-                            gc:setFont("sansserif", "r", 8); gc:drawString("M = " .. formatLabel(math.abs(offsetRm_B)), px2 + 22, py2 + 22)
+                            local cw = offsetRm_B < 0
+                            local m_lbl = "M = " .. formatLabel(math.abs(offsetRm_B))
+                            if explosionPage == 2 then cw = false; m_lbl = "M_" .. getSuppLetter(s.k2); e2Moment(m_lbl, cw) end
+                            gc:setPen("thin", "smooth"); drawMoment(gc, px2, py2, 28, cw)
+                            gc:setFont("sansserif", "r", 8); gc:drawString(m_lbl, px2 + 22, py2 + 22)
                         end
                     end
                 end
 
+                -- Gegenseite am Knoten nur, wenn dort ein biegesteifer Rest haengt (sonst zeichnet sie der
+                -- andere Gelenkstab bzw. sie gehoert zum Gelenkbolzen)
                 local should_draw_B = false
-                if not knoten[s.k2].gelenk then
-                    if explodeB and not is_only_rod_B then
-                        should_draw_B = (not hovered_ts or isRigidNodeInTS(s.k2, hovered_ts))
-                    else
-                        should_draw_B = (not hovered_ts or (glob_ts_scheibe and glob_ts_scheibe[i] == hovered_ts))
-                    end
+                if not knoten[s.k2].gelenk and #gelenkKnoten(s.k2).R > 0 and mehrB then
+                    should_draw_B = (not hovered_ts or isRigidNodeInTS(s.k2, hovered_ts))
                 end
                 
                 if should_draw_B then
@@ -8330,7 +9832,9 @@ function on.paint(gc)
                     if not s.gelenk_B then
                         if math.abs(M_b_disp) > 1e-4 or explosionPage == 2 then
                             if autoKGV and KGV_Zustand > 0 then gc:setColorRGB(200, 0, 200) else gc:setColorRGB(0, 150, 0) end
-                            gc:setPen("thin", "smooth"); drawMoment(gc, draw_orig_px2, draw_orig_py2, 16, M_b_disp >= 0)
+                            local cw = M_b_disp >= 0
+                            if explosionPage == 2 then cw = flipB > 0; e2Moment(prefixM_B:gsub(" = ", ""), cw) end
+                            gc:setPen("thin", "smooth"); drawMoment(gc, draw_orig_px2, draw_orig_py2, 16, cw)
                             gc:setFont("sansserif", "r", 10)
                             local label_m
                             if explosionPage == 2 then
@@ -8501,63 +10005,8 @@ function on.paint(gc)
                     end
                     
                     if modusText == "PvV" then
-                        local k_ux, k_uy = getKinematicDisp(i)
-                        local anim_f = (0.5 * drawPxProMeter) / (kinematic_max_disp and kinematic_max_disp > 1e-6 and kinematic_max_disp or 1)
-                        
-                        local k_phi = getKinematicRot and getKinematicRot(i) or 0
-                        local k_scheibe = kinematic_states and kinematic_states[i] and kinematic_states[i].scheibe or 1
-                        local phi_abs = math.abs(k_phi)
-                        local function formatDelta(lbl, val)
-                            if phi_abs > 1e-4 then 
-                                return string.format("%s = %.2f * φ_0", lbl, math.abs(val)/phi_abs)
-                            else 
-                                local real_lbl = (k_scheibe and kinematic_disk_states and kinematic_disk_states[k_scheibe] and kinematic_disk_states[k_scheibe].type == "trans") and string.format("δ_%d", k_scheibe) or lbl
-                                return string.format("%s = %.2f", real_lbl, math.abs(val)) 
-                            end
-                        end
-                        
-                        if math.abs(fx * k_ux) > 1e-4 then
-                            gc:setColorRGB(200, 0, 200)
-                            local disp_px = k_ux * anim_f
-                            drawArrow(gc, px - disp_px, py, px, py)
-                            gc:setFont("sansserif", "r", 8)
-                            gc:drawString(formatDelta("δ_x", k_ux), px - disp_px, py - 10)
-                        end
-                        if math.abs(fy * k_uy) > 1e-4 then
-                            gc:setColorRGB(200, 0, 200)
-                            local disp_py = k_uy * anim_f
-                            drawArrow(gc, px, py - disp_py, px, py)
-                            gc:setFont("sansserif", "r", 8)
-                            gc:drawString(formatDelta("δ_y", k_uy), px + 5, py - disp_py - 10)
-                        end
-                        local r = math.rad(k.winkel or 0)
-                        local cw, sw = math.cos(r), math.sin(r)
-                        
-                        local is_released_H = pvv_released_binding and pvv_released_binding.node == i and pvv_released_binding.type == "lager_x"
-                        if is_released_H or (k.lager_x and math.abs(k.R_xi or 0) > 1e-4) then
-                            local u_H = k_ux * cw - k_uy * sw
-                            if is_released_H or math.abs(k.R_xi * u_H) > 1e-4 then
-                                gc:setColorRGB(200, 0, 200)
-                                local disp_H = u_H * anim_f
-                                local dx, dy = cw * disp_H, -sw * disp_H
-                                drawArrow(gc, px - dx, py - dy, px, py)
-                                gc:setFont("sansserif", "r", 8)
-                                gc:drawString(formatDelta("δ_H", u_H), px - dx, py - dy - 10)
-                            end
-                        end
-                        
-                        local is_released_V = pvv_released_binding and pvv_released_binding.node == i and pvv_released_binding.type == "lager_y"
-                        if is_released_V or (k.lager_y and math.abs(k.R_eta or 0) > 1e-4) then
-                            local u_V = k_ux * sw + k_uy * cw
-                            if is_released_V or math.abs(k.R_eta * u_V) > 1e-4 then
-                                gc:setColorRGB(200, 0, 200)
-                                local disp_V = u_V * anim_f
-                                local dx, dy = sw * disp_V, cw * disp_V
-                                drawArrow(gc, px - dx, py - dy, px, py)
-                                gc:setFont("sansserif", "r", 8)
-                                gc:drawString(formatDelta("δ_V", u_V), px - dx, py - dy - 10)
-                            end
-                        end
+                        -- Wege wie im Export (pvv_kin): Knotenlasten in Lastrichtung, H und V in Lagerrichtung
+                        pvvZeichneKnotenWege(gc, i, px, py, drawPxProMeter)
                     end
                 end
 
@@ -8593,12 +10042,14 @@ function on.paint(gc)
                         local r = math.rad(k.winkel or 0)
                         local cw, sw = math.cos(r), math.sin(r)
                         if orig_ansichtsModus ~= "N" and orig_ansichtsModus ~= "Q" and orig_ansichtsModus ~= "M" and not ansicht_ausgeblendet then
-                            if k.lager_x and (math.abs(k.R_xi or 0) > 1e-4 or explosionPage == 2) then drawReactionArrow(gc, k.R_xi or 0, cw, -sw, px, py, "H = ", getSuppLetter(i).."_h", symbolischer_modus and fm(k.symb_R_xi) or nil, explosionPage == 2) end
-                            if k.lager_y and (math.abs(k.R_eta or 0) > 1e-4 or explosionPage == 2) then drawReactionArrow(gc, k.R_eta or 0, -sw, -cw, px, py, "V = ", getSuppLetter(i).."_v", symbolischer_modus and fm(k.symb_R_eta) or nil, explosionPage == 2) end
-                            if k.lager_m and (math.abs(k.R_m or 0) > 1e-4 or explosionPage == 2) then
+                            if (k.lager_x or k.cx > 0) and (math.abs(k.R_xi or 0) > 1e-4 or explosionPage == 2) then drawReactionArrow(gc, k.R_xi or 0, cw, -sw, px, py, "H = ", getSuppLetter(i).."_h", symbolischer_modus and fm(k.symb_R_xi) or nil, explosionPage == 2) end
+                            if (k.lager_y or k.cy > 0) and (math.abs(k.R_eta or 0) > 1e-4 or explosionPage == 2) then drawReactionArrow(gc, k.R_eta or 0, -sw, -cw, px, py, "V = ", getSuppLetter(i).."_v", symbolischer_modus and fm(k.symb_R_eta) or nil, explosionPage == 2) end
+                            if (k.lager_m or k.cm > 0) and (math.abs(k.R_m or 0) > 1e-4 or explosionPage == 2) then
                                 if autoKGV and KGV_Zustand > 0 then gc:setColorRGB(200, 0, 200) else gc:setColorRGB(0, 0, 255) end
                                 gc:setPen("thin", "smooth")
-                                drawMoment(gc, px, py, 28, k.R_m < 0)
+                                local cw_m = (k.R_m or 0) < 0
+                                if explosionPage == 2 then cw_m = false; e2Moment("M_" .. getSuppLetter(i), cw_m) end
+                                drawMoment(gc, px, py, 28, cw_m)
                                 gc:setFont("sansserif", "r", 9)
                                 local m_lbl = ""
                                 if explosionPage == 2 then
@@ -8880,54 +10331,9 @@ function on.paint(gc)
                     gc:drawString(text, nd_px - ax - 8 * nx, nd_py - ay - 8 * ny)
                     gc:drawString(text, rd_px + ax + 8 * nx, rd_py + ay + 8 * ny)
                     
-                    -- Displacement drawing (delta_N, delta_Q)
-                    local ux_r = bind.endA and u1x or u2x
-                    local uy_r = bind.endA and u1y or u2y
-                    local delta_val = (ux_r - ux_n) * nx + (uy_r - uy_n) * ny
-                    local lbl_disp = bind.type == "q_gelenk" and "δ_Q" or "δ_N"
-                    
-                    local s_disk = s.scheibe or 1
-                    local d_state = kinematic_disk_states and kinematic_disk_states[s_disk]
-                    local phi_abs = d_state and math.abs(d_state.phi) or 0
-                    local disp_str = ""
-                    local abstand = 0
-                    local rot_part = 0
-                    local trans_part = delta_val
-                    
-                    if d_state and d_state.type == "rot" and math.abs(phi_abs) > 1e-6 then
-                        if bind.type == "n_gelenk" then
-                            rot_part = 0
-                            abstand = 0
-                            trans_part = delta_val
-                        else
-                            local n_idx = bind.endA and s.k1 or s.k2
-                            local kn = knoten[n_idx]
-                            
-                            local dy_pol = kn.y - d_state.cy
-                            local dx_pol = kn.x - d_state.cx
-                            
-                            local ux_rot = -d_state.phi * dy_pol
-                            local uy_rot = d_state.phi * dx_pol
-                            
-                            rot_part = ux_rot * nx + uy_rot * ny
-                            abstand = rot_part / d_state.phi
-                            trans_part = delta_val - rot_part
-                        end
-                    end
-                    
-                    local sign = delta_val < 0 and -1 or 1
-                    local disp_abstand = abstand * sign
-                    local disp_trans = trans_part * sign
-                    
-                    disp_str = lbl_disp .. " = "
-                    if math.abs(disp_abstand) > 1e-4 and math.abs(disp_trans) > 1e-4 then
-                        disp_str = disp_str .. string.format("%.2f * phi_%d %s %.2f", disp_abstand, s_disk, disp_trans > 0 and "+" or "-", math.abs(disp_trans))
-                    elseif math.abs(disp_abstand) > 1e-4 then
-                        disp_str = disp_str .. string.format("%.2f * phi_%d", disp_abstand, s_disk)
-                    else
-                        disp_str = disp_str .. formatLabel(math.abs(disp_trans))
-                    end
-                    
+                    -- Klaffung mit Name und Wert wie im Export (δ_G, Spalte 3 von pvv_kin)
+                    local disp_str = pvvLabel("δ_G") or ""
+
                     gc:setColorRGB(200, 0, 200)
                     gc:setPen("thin", "smooth")
                     local ox, oy = -ny * 15, nx * 15
@@ -8976,14 +10382,17 @@ function on.paint(gc)
             local nd_px = n_px + ux_n * anim_f
             local nd_py = n_py + uy_n * anim_f
             
+            -- H und V in Lagerrichtung wie im Arbeitssatz: xi = (cos, -sin), eta = (sin, cos)
+            local lw = math.rad(k.winkel or 0)
+            local lcw, lsw = math.cos(lw), math.sin(lw)
             if bind.type == "lager_x" then
-                drawArrow(gc, nd_px, nd_py, nd_px + 20, nd_py)
+                drawArrow(gc, nd_px, nd_py, nd_px + 20 * lcw, nd_py - 20 * lsw)
                 gc:setFont("sansserif", "b", 10)
-                gc:drawString("H", nd_px + 25, nd_py - 5)
+                gc:drawString("H", nd_px + 25 * lcw, nd_py - 25 * lsw - 5)
             elseif bind.type == "lager_y" then
-                drawArrow(gc, nd_px, nd_py, nd_px, nd_py + 20)
+                drawArrow(gc, nd_px, nd_py, nd_px + 20 * lsw, nd_py + 20 * lcw)
                 gc:setFont("sansserif", "b", 10)
-                gc:drawString("V", nd_px + 5, nd_py + 25)
+                gc:drawString("V", nd_px + 25 * lsw + 5, nd_py + 25 * lcw)
             elseif bind.type == "lager_m" then
                 -- positive moment is mathematically CCW. On screen (y down), this visually goes from right (0) to UP (-90).
                 -- let's draw a CCW arc of 270 degrees
@@ -8993,7 +10402,7 @@ function on.paint(gc)
                 local eA = math.rad(startAng + sweep); local tA = math.rad(startAng + sweep - 15)
                 drawArrow(gc, nd_px + 15*math.cos(tA), nd_py - 15*math.sin(tA), nd_px + 15*math.cos(eA), nd_py - 15*math.sin(eA))
                 gc:setFont("sansserif", "b", 10)
-                gc:drawString("M", nd_px + 20, nd_py - 15)
+                gc:drawString("M_A", nd_px + 20, nd_py - 15)
             elseif bind.type == "knoten_gelenk" then
                 local found_rods = {}
                 for i, s in ipairs(staebe) do
@@ -9046,6 +10455,7 @@ function on.paint(gc)
         end
     end
 
+    if isKinematic and pvv_released_binding then pvvZeichneGelenkWinkel(gc, drawPxProMeter) end
     if isKinematic and kinematic_disk_states then
         for i, state in ipairs(kinematic_disk_states) do
             if state.type == "rot" and math.abs(state.phi) > 1e-9 then
@@ -9143,17 +10553,20 @@ function on.paint(gc)
                     end
                     
                     gc:setFont("sansserif", "r", 10)
-                    local txt = (kinematic_seed_info and kinematic_seed_info.disk == i) and "Φ_0 = 1" or string.format("Φ_%d", i)
+                    local txt = pvvScheibenText(i)
                     local txt_w = gc:getStringWidth(txt)
                     local midAng = math.rad(angle_0 + v_phi / 2)
                     local r_txt = r_ref + 10
                     gc:drawString(txt, nd_rx + r_txt*math.cos(midAng) - txt_w/2, nd_ry - r_txt*math.sin(midAng) - 6)
                 end
+            elseif state.type == "trans" then
+                pvvZeichneVerschiebung(gc, i, drawPxProMeter)
             end
         end
     end
 
     -- Warnhinweise; ESC schliesst sie (on.escapeKey), eine neue Berechnung zeigt sie wieder
+    hinweisBoxScrollbar = false   -- setzt zeichneHinweisBox wieder, wenn die gelbe Box zu lang ist
     if symbolFehler and symbolFehlerOffen then
         local boxW = math.min(b - 20, 300)
         -- Meldung auf Boxbreite umbrechen
@@ -9182,30 +10595,7 @@ function on.paint(gc)
         gc:setFont("sansserif", "b", 10); gc:drawString("Starrmodus & statisch unbestimmt!", boxX + 8, boxY + 12)
         gc:setFont("sansserif", "r", 9); gc:drawString("[Esc]", boxX + boxW - 34, boxY + 12)
     elseif meldungText or (hinweisOffen and #hinweisListe > 0) then
-        local liste = meldungText and { meldungText } or hinweisListe
-        local titel = meldungText and (meldungTitel or "Export") or "Hinweis"
-        local boxW = math.min(b - 20, 300)
-        gc:setFont("sansserif", "r", 9)
-        local zeilen = {}
-        for hi, text in ipairs(liste) do
-            if hi > 1 then zeilen[#zeilen + 1] = "" end
-            local zeile = ""
-            for wort in text:gmatch("%S+") do
-                local probe = (zeile == "") and wort or (zeile .. " " .. wort)
-                if zeile ~= "" and gc:getStringWidth(probe) > boxW - 16 then zeilen[#zeilen + 1] = zeile; zeile = wort else zeile = probe end
-            end
-            if zeile ~= "" then zeilen[#zeilen + 1] = zeile end
-        end
-        local boxH = math.min(28 + 13 * #zeilen, h - 10)
-        local boxX, boxY = math.floor((b - boxW) / 2), math.floor((h - boxH) / 2)
-        gc:setColorRGB(255, 235, 150); gc:fillRect(boxX, boxY, boxW, boxH); gc:setColorRGB(0, 0, 0); gc:drawRect(boxX, boxY, boxW, boxH)
-        gc:setFont("sansserif", "b", 10); gc:drawString(titel .. ":", boxX + 8, boxY + 6)
-        gc:setFont("sansserif", "r", 9)
-        for zi, z in ipairs(zeilen) do
-            local y = boxY + 12 + 13 * zi
-            if y + 12 <= boxY + boxH then gc:drawString(z, boxX + 8, y) end
-        end
-        gc:drawString("[Esc]", boxX + boxW - 34, boxY + 6)
+        zeichneHinweisBox(gc, b, h, meldungText and { meldungText } or hinweisListe, meldungText and (meldungTitel or "Export") or "Hinweis")
     end
     
     if pvvPrompt then
@@ -9217,58 +10607,17 @@ function on.paint(gc)
         local menueHoehe = 150
         if menuTyp == "knoten" then
             if isKinematic then
-                local k = knoten[menuIndex]
-                local fx_str = (symbolischer_modus and k.last_x_str) and k.last_x_str or formatLabel(k.last_x or 0)
-                local fy_str = (symbolischer_modus and k.last_y_str) and k.last_y_str or formatLabel(k.last_y or 0)
-                local fm_str = (symbolischer_modus and k.last_m_str) and k.last_m_str or formatLabel(k.last_m or 0)
-                local has_m_gelenk = false
-                if pvv_released_binding and pvv_released_binding.node == menuIndex then
-                    local bind = pvv_released_binding
-                    if bind.type == "lager_x" then fx_str = "H" elseif bind.type == "lager_y" then fy_str = "V" elseif bind.type == "lager_m" then fm_str = "M" elseif bind.type == "knoten_gelenk" then has_m_gelenk = true end
-                end
-                local has_fx = fx_str ~= "0" and fx_str ~= "0.00"; local has_fy = fy_str ~= "0" and fy_str ~= "0.00"; local has_fm = fm_str ~= "0" and fm_str ~= "0.00"
-                if has_fx or has_fy or has_fm or has_m_gelenk then
-                    local cy = 40
-                    if has_fx then cy = cy + 20 end; if has_fy then cy = cy + 20 end; if has_fm then cy = cy + 20 end
-                    cy = cy + 10
-                    if has_fx then cy = cy + 20 end; if has_fy then cy = cy + 20 end; if has_fm then cy = cy + 20 end
-                    if has_m_gelenk then cy = cy + 20 end
-                    menueHoehe = cy + 50
-                else menueHoehe = 80 end
+                menueHoehe = pvvMenueHoehe("knoten", menuIndex)
             else
-                if menuSeite == 1 then menueHoehe = 160 elseif menuSeite == 2 then menueHoehe = 140 elseif menuSeite == 3 then menueHoehe = 120 elseif menuSeite == 4 then menueHoehe = 200 elseif menuSeite == 5 then menueHoehe = 160 else menueHoehe = 140 end
+                if menuSeite == 1 then menueHoehe = 160 elseif menuSeite == 2 then menueHoehe = 140 elseif menuSeite == 3 then menueHoehe = 120 elseif menuSeite == 4 then menueHoehe = 220 elseif menuSeite == 5 then menueHoehe = 160 else menueHoehe = 140 end
             end
         elseif menuTyp == "stab" then
             if isKinematic then
-                local s = staebe[menuIndex]
-                local cy = 60
-                local has_load = (math.abs(s.q) + math.abs(s.q_A or 0) + math.abs(s.q_B or 0) + math.abs(s.n) + math.abs(s.n_A or 0) + math.abs(s.n_B or 0) + math.abs(s.gx or 0) + math.abs(s.gy or 0) + math.abs(s.m or 0)) > 1e-4
-                if has_load then cy = cy + 40 end
-                if s.q_gelenk_A or s.n_gelenk_A or (pvv_released_binding and pvv_released_binding.stab == menuIndex and pvv_released_binding.endA and (pvv_released_binding.type == "q_gelenk" or pvv_released_binding.type == "n_gelenk" or pvv_released_binding.type == "m_gelenk")) then cy = cy + 40 end
-                if s.q_gelenk_B or s.n_gelenk_B or (pvv_released_binding and pvv_released_binding.stab == menuIndex and not pvv_released_binding.endA and (pvv_released_binding.type == "q_gelenk" or pvv_released_binding.type == "n_gelenk" or pvv_released_binding.type == "m_gelenk")) then cy = cy + 40 end
-                
-                local w_tot, w_str = getKinematicWork_Stab(menuIndex)
-                local is_1last_stab = false; local is_1last_node = false
-                if pvv_released_binding and (pvv_released_binding.type == "q_gelenk" or pvv_released_binding.type == "n_gelenk" or pvv_released_binding.type == "m_gelenk") then
-                    local nodeIdx = nil
-                    if pvv_released_binding.stab then local b_stab = staebe[pvv_released_binding.stab]; nodeIdx = pvv_released_binding.endA and b_stab.k1 or b_stab.k2 end
-                    if (pvv_released_binding.stab and menuIndex == pvv_released_binding.stab) or (s.k1 == nodeIdx or s.k2 == nodeIdx) then
-                        if (pvv_released_binding.stab and menuIndex == pvv_released_binding.stab) then is_1last_stab = true else is_1last_node = true end
-                    end
-                end
-                
-                if has_load or is_1last_stab or is_1last_node then
-                    cy = cy + 20
-                    if type(w_str) == "table" then for _, term in ipairs(w_str) do cy = cy + 15 end end
-                    if is_1last_stab then cy = cy + 15 end
-                    if is_1last_node then cy = cy + 15 end
-                    cy = cy + 20
-                end
-                menueHoehe = cy + 20
+                menueHoehe = pvvMenueHoehe("stab", menuIndex)
             else
                 if menuSeite == 1 then menueHoehe = 200 elseif menuSeite == 2 then menueHoehe = 120 elseif menuSeite == 3 then menueHoehe = 200 elseif menuSeite == 6 then menueHoehe = 160 elseif menuSeite == 7 then menueHoehe = 180 else menueHoehe = 160 end
             end
-        elseif menuTyp == "obermenue" then if menuSeite == 1 then menueHoehe = 220 elseif menuSeite == 2 then menueHoehe = 220 elseif menuSeite == 3 then menueHoehe = 240 else menueHoehe = 120 end
+        elseif menuTyp == "obermenue" then if menuSeite == 1 then menueHoehe = 220 elseif menuSeite == 2 then menueHoehe = 220 elseif menuSeite == 3 then menueHoehe = 240 else menueHoehe = 180 end
         elseif menuTyp == "pvv_knoten" then menueHoehe = 120
         elseif menuTyp == "pvv_stab" then menueHoehe = 160 end
 
@@ -9286,122 +10635,11 @@ function on.paint(gc)
 
         if menuTyp == "knoten" then
             if isKinematic then
-                gc:drawString("Knoten " .. menuIndex .. " (PvV-Modus)", b - 160, 15); gc:setFont("sansserif", "r", 9)
-        local k_ux, k_uy = getKinematicDisp(menuIndex)
-        local k_phi = getKinematicRot and getKinematicRot(menuIndex) or 0
-        local k = knoten[menuIndex]
-        local fx_str = (symbolischer_modus and k.last_x_str) and k.last_x_str or formatLabel(k.last_x or 0)
-        local fy_str = (symbolischer_modus and k.last_y_str) and k.last_y_str or formatLabel(k.last_y or 0)
-        local fm_str = (symbolischer_modus and k.last_m_str) and k.last_m_str or formatLabel(k.last_m or 0)
-
-        local is_released_x = false; local is_released_y = false; local is_released_m = false
-        local has_m_gelenk = false
-        local m_gelenk_phi1, m_gelenk_phi2 = 0, 0
-
-        if pvv_released_binding and pvv_released_binding.node == menuIndex then
-            local bind = pvv_released_binding
-            if bind.type == "lager_x" then fx_str = "H"; is_released_x = true
-            elseif bind.type == "lager_y" then fy_str = "V"; is_released_y = true
-            elseif bind.type == "lager_m" then fm_str = "M"; is_released_m = true
-            elseif bind.type == "knoten_gelenk" then
-                has_m_gelenk = true
-                local m_gelenk_s1, m_gelenk_s2 = nil, nil
-                for _, s in ipairs(staebe) do
-                    if s.k1 == menuIndex or s.k2 == menuIndex then
-                        if not m_gelenk_s1 then m_gelenk_s1 = s
-                        elseif not m_gelenk_s2 then m_gelenk_s2 = s end
-                    end
-                end
-                if m_gelenk_s1 then m_gelenk_phi1 = -(kinematic_disk_states and kinematic_disk_states[m_gelenk_s1.scheibe] and kinematic_disk_states[m_gelenk_s1.scheibe].type == "rot" and kinematic_disk_states[m_gelenk_s1.scheibe].phi or 0) end
-                if m_gelenk_s2 then m_gelenk_phi2 = -(kinematic_disk_states and kinematic_disk_states[m_gelenk_s2.scheibe] and kinematic_disk_states[m_gelenk_s2.scheibe].type == "rot" and kinematic_disk_states[m_gelenk_s2.scheibe].phi or 0) end
-            end
-        end
-
-        local has_fx = fx_str ~= "0" and fx_str ~= "0.00"
-        local has_fy = fy_str ~= "0" and fy_str ~= "0.00"
-        local has_fm = fm_str ~= "0" and fm_str ~= "0.00"
-
-        local current_y = 40
-        if has_fx or has_fy or has_fm or has_m_gelenk then
-            if has_fx then
-                gc:setColorRGB(0,0,0); gc:drawString("Starrk. u_x:", b - 160, current_y)
-                gc:setColorRGB(0, 120, 0); gc:drawString(string.format("%.4f", k_ux), b - 70, current_y)
-                current_y = current_y + 20
-            end
-            if has_fy then
-                gc:setColorRGB(0,0,0); gc:drawString("Starrk. u_y:", b - 160, current_y)
-                gc:setColorRGB(0, 120, 0); gc:drawString(string.format("%.4f", k_uy), b - 70, current_y)
-                current_y = current_y + 20
-            end
-            if has_fm then
-                gc:setColorRGB(0,0,0); gc:drawString("Starrk. phi:", b - 160, current_y)
-                gc:setColorRGB(0, 120, 0); gc:drawString(string.format("%.4f", k_phi), b - 70, current_y)
-                current_y = current_y + 20
-            end
-
-            local w_str_parts = {}
-            local w_val_sum = 0
-            if has_fx then
-                gc:setColorRGB(0,0,0); gc:drawString("Arbeit W_x:", b - 160, current_y)
-                local val = evalInput(fx_str) or 1
-                if symbolischer_modus or is_released_x then
-                    gc:setColorRGB(200, 50, 50); gc:drawString(string.format("%s * %.2f", fx_str, k_ux), b - 80, current_y)
-                else
-                    gc:setColorRGB(200, 50, 50); gc:drawString(string.format("%s * %.2f = %.2f", fx_str, k_ux, val * k_ux), b - 80, current_y)
-                end
-                table.insert(w_str_parts, string.format("%s*%.2f", fx_str, k_ux))
-                if not is_released_x then w_val_sum = w_val_sum + val * k_ux end
-                current_y = current_y + 20
-            end
-            if has_fy then
-                gc:setColorRGB(0,0,0); gc:drawString("Arbeit W_y:", b - 160, current_y)
-                local val = evalInput(fy_str) or 1
-                if symbolischer_modus or is_released_y then
-                    gc:setColorRGB(200, 50, 50); gc:drawString(string.format("%s * %.2f", fy_str, k_uy), b - 80, current_y)
-                else
-                    gc:setColorRGB(200, 50, 50); gc:drawString(string.format("%s * %.2f = %.2f", fy_str, k_uy, val * k_uy), b - 80, current_y)
-                end
-                table.insert(w_str_parts, string.format("%s*%.2f", fy_str, k_uy))
-                if not is_released_y then w_val_sum = w_val_sum + val * k_uy end
-                current_y = current_y + 20
-            end
-            if has_fm then
-                gc:setColorRGB(0,0,0); gc:drawString("Arbeit W_phi:", b - 160, current_y)
-                local val = evalInput(fm_str) or 1
-                if symbolischer_modus or is_released_m then
-                    gc:setColorRGB(200, 50, 50); gc:drawString(string.format("%s * %.2f", fm_str, k_phi), b - 80, current_y)
-                else
-                    gc:setColorRGB(200, 50, 50); gc:drawString(string.format("%s * %.2f = %.2f", fm_str, k_phi, val * k_phi), b - 80, current_y)
-                end
-                table.insert(w_str_parts, string.format("%s*%.2f", fm_str, k_phi))
-                if not is_released_m then w_val_sum = w_val_sum + val * k_phi end
-                current_y = current_y + 20
-            end
-            if has_m_gelenk then
-                gc:setColorRGB(0,0,0); gc:drawString("Arbeit W_M:", b - 160, current_y)
-                local dphi = m_gelenk_phi1 - m_gelenk_phi2
-                gc:setColorRGB(200, 50, 50); gc:drawString(string.format("M * %.2f", dphi), b - 80, current_y)
-                table.insert(w_str_parts, string.format("M*%.2f", dphi))
-                current_y = current_y + 20
-            end
-
-            current_y = current_y + 5
-            gc:setColorRGB(0,0,0)
-            gc:drawLine(b - 160, current_y - 2, b - 10, current_y - 2)
-            gc:drawString("Summe W:", b - 160, current_y + 5)
-            gc:setFont("sansserif", "r", 8)
-            local pvv_sum_str = table.concat(w_str_parts, " + ")
-            gc:setColorRGB(200, 50, 50)
-            gc:drawString(pvv_sum_str or "", b - 160, current_y + 20)
-            gc:setFont("sansserif", "r", 9)
-
-        else
-            gc:setColorRGB(150, 150, 150)
-            gc:drawString("Keine Lasten vorhanden", b - 160, current_y)
-        end
+                gc:drawString("Knoten " .. menuIndex .. " (PvV-Modus)", b - 160, 15)
+                pvvZeichneMenue(gc, "knoten", menuIndex, b)
             else
                 local menueHoehe = 150
-                if menuSeite == 1 then menueHoehe = 160 elseif menuSeite == 2 then menueHoehe = 140 elseif menuSeite == 3 then menueHoehe = 120 elseif menuSeite == 4 then menueHoehe = 200 else menueHoehe = 140 end
+                if menuSeite == 1 then menueHoehe = 160 elseif menuSeite == 2 then menueHoehe = 140 elseif menuSeite == 3 then menueHoehe = 120 elseif menuSeite == 4 then menueHoehe = 220 else menueHoehe = 140 end
                 
                 gc:drawString("Knoten " .. menuIndex .. " < S." .. menuSeite .. "/4 >", b - 160, 15); gc:setFont("sansserif", "r", 9)
                 local k = knoten[menuIndex]
@@ -9436,9 +10674,13 @@ function on.paint(gc)
                     if menuZeile == 3 and eingabeModus then gc:drawString(eingabeText .. "_", b - 65, 80) else gc:drawString(k.cm_str or tostring(k.cm or 0), b - 65, 80) end
                     if menuZeile == 4 and eingabeModus then gc:drawString(eingabeText .. "_", b - 65, 100) else gc:drawString(tostring(k.f_winkel or 0), b - 65, 100) end
                 elseif menuSeite == 4 then
-                    gc:drawString("R_xi (Parallel):", b - 160, 40); gc:drawString("R_eta (Senkr.):", b - 160, 60); gc:drawString("R_m (Moment):", b - 160, 80)
-                    gc:drawString("ü_x (WGV):", b - 160, 100); gc:drawString("ü_y (WGV):", b - 160, 120); gc:drawString("ü_ges (WGV):", b - 160, 140); gc:drawString("phi (WGV):", b - 160, 160)
-                    gc:drawString("In TI speichern:", b - 160, 180)
+                    gc:drawString("Verschiebung:", b - 160, 40)
+                    if menuZeile == 1 then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
+                    gc:drawString("Export", b - 60, 40)
+                    gc:setColorRGB(0, 0, 0)
+                    gc:drawString("R_xi (Parallel):", b - 160, 60); gc:drawString("R_eta (Senkr.):", b - 160, 80); gc:drawString("R_m (Moment):", b - 160, 100)
+                    gc:drawString("ü_x (WGV):", b - 160, 120); gc:drawString("ü_y (WGV):", b - 160, 140); gc:drawString("ü_ges (WGV):", b - 160, 160); gc:drawString("phi (WGV):", b - 160, 180)
+                    gc:drawString("In TI speichern:", b - 160, 200)
                     
                     local ux = (k.eq_x and k.eq_x > 0 and glob_u) and glob_u[k.eq_x] or 0
                     local uy = (k.eq_y and k.eq_y > 0 and glob_u) and glob_u[k.eq_y] or 0
@@ -9457,178 +10699,25 @@ function on.paint(gc)
                         local s_Ry = k.symb_Ry or "0"
                         local s_Rm = k.symb_Rm or "0"
                         
-                        gc:drawString(fm(s_Rx), b - 60, 40)
-                        gc:drawString(fm(s_Ry), b - 60, 60)
-                        gc:drawString(fm(s_Rm), b - 60, 80)
+                        gc:drawString(fm(s_Rx), b - 60, 60)
+                        gc:drawString(fm(s_Ry), b - 60, 80)
+                        gc:drawString(fm(s_Rm), b - 60, 100)
                     else
-                        gc:drawString(formatLabel(k.R_xi or 0), b - 60, 40); gc:drawString(formatLabel(k.R_eta or 0), b - 60, 60); gc:drawString(formatLabel(k.R_m or 0), b - 60, 80)
+                        gc:drawString(formatLabel(k.R_xi or 0), b - 60, 60); gc:drawString(formatLabel(k.R_eta or 0), b - 60, 80); gc:drawString(formatLabel(k.R_m or 0), b - 60, 100)
                     end
                     
                     gc:setColorRGB(255, 120, 0)
-                    gc:drawString(string.format("%.4f", ux), b - 60, 100); gc:drawString(string.format("%.4f", uy), b - 60, 120); gc:drawString(string.format("%.4f", u_ges), b - 60, 140); gc:drawString(string.format("%.4f", phi), b - 60, 160)
-                    if menuZeile == 8 then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
-                            gc:drawString("Export", b - 60, 180)
+                    gc:drawString(string.format("%.4f", ux), b - 60, 120); gc:drawString(string.format("%.4f", uy), b - 60, 140); gc:drawString(string.format("%.4f", u_ges), b - 60, 160); gc:drawString(string.format("%.4f", phi), b - 60, 180)
+                    if menuZeile == 9 then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
+                            gc:drawString("Export", b - 60, 200)
                 end
             end
 
         elseif menuTyp == "stab" then
             local s = staebe[menuIndex]
             if isKinematic then
-                gc:drawString("Stab " .. menuIndex .. " (PvV-Modus)", b - 160, 15); gc:setFont("sansserif", "r", 9)
-                
-                gc:drawString("Verdrehung phi:", b - 160, 40)
-                gc:setColorRGB(0, 120, 0)
-                local s_phi = kinematic_disk_states and kinematic_disk_states[s.scheibe] and kinematic_disk_states[s.scheibe].type == "rot" and kinematic_disk_states[s.scheibe].phi or 0
-                gc:drawString(string.format("%.4f", -s_phi), b - 60, 40)
-                
-                local w_tot, w_str = getKinematicWork_Stab(menuIndex)
-                local current_y = 60
-                
-                local has_load = (math.abs(s.q) + math.abs(s.q_A or 0) + math.abs(s.q_B or 0) + math.abs(s.n) + math.abs(s.n_A or 0) + math.abs(s.n_B or 0) + math.abs(s.gx or 0) + math.abs(s.gy or 0) + math.abs(s.m or 0)) > 1e-4
-                if has_load then
-                    gc:setColorRGB(0,0,0)
-                    gc:drawString("Lastangriff δ_x:", b - 160, current_y)
-                    gc:drawString("Lastangriff δ_y:", b - 160, current_y + 20)
-                    local k1, k2 = knoten[s.k1], knoten[s.k2]
-                    local dx, dy = k2.x - k1.x, k2.y - k1.y
-                    local L = math.sqrt(dx^2 + dy^2)
-                    local cosA, sinA = dx/L, dy/L
-                    
-                    local qA = s.q + (s.q_A or 0); local qB = s.q + (s.q_B or 0)
-                    local Rq = (qA + qB)/2 * L + (s.R_q_cas or 0)
-                    local Sq = (L^2)/6 * (qA + 2*qB) + (s.S_q_cas or 0)
-                    local nA = s.n + (s.n_A or 0); local nB = s.n + (s.n_B or 0)
-                    local Rn = (nA + nB)/2 * L + (s.R_n_cas or 0)
-                    local Sn = (L^2)/6 * (nA + 2*nB) + (s.S_n_cas or 0)
-                    
-                    local R_sum = math.abs(Rq) + math.abs(Rn) + math.abs(s.R_gx_cas or 0) + math.abs(s.R_gy_cas or 0)
-                    local S_sum = math.abs(Sq) + math.abs(Sn) + math.abs(s.S_gx_cas or 0) + math.abs(s.S_gy_cas or 0)
-                    
-                    local xs = L/2
-                    if R_sum > 1e-6 then xs = S_sum / R_sum end
-                    local cx = k1.x + xs * cosA
-                    local cy = k1.y + xs * sinA
-                    
-                    local ux, uy = getKinematicDisp_Point(s.scheibe, cx, cy)
-                    gc:setColorRGB(0, 120, 0)
-                    gc:drawString(string.format("%.4f", ux), b - 60, current_y)
-                    gc:drawString(string.format("%.4f", uy), b - 60, current_y + 20)
-                    current_y = current_y + 40
-                end
-                
-                if s.q_gelenk_A or s.n_gelenk_A or (pvv_released_binding and pvv_released_binding.stab == menuIndex and pvv_released_binding.endA and (pvv_released_binding.type == "q_gelenk" or pvv_released_binding.type == "n_gelenk")) then
-                    gc:setColorRGB(0,0,0)
-                    gc:drawString("Klaffung k1 δ_x:", b - 160, current_y)
-                    gc:drawString("Klaffung k1 δ_y:", b - 160, current_y + 20)
-                    local u1x, u1y, u2x, u2y = getKinematicDisp_Stab(menuIndex)
-                    local n_ux, n_uy = getKinematicDisp(s.k1)
-                    gc:setColorRGB(0, 120, 0)
-                    gc:drawString(string.format("%.4f", u1x - n_ux), b - 60, current_y)
-                    gc:drawString(string.format("%.4f", u1y - n_uy), b - 60, current_y + 20)
-                    current_y = current_y + 40
-                end
-                
-                if s.q_gelenk_B or s.n_gelenk_B or (pvv_released_binding and pvv_released_binding.stab == menuIndex and not pvv_released_binding.endA and (pvv_released_binding.type == "q_gelenk" or pvv_released_binding.type == "n_gelenk")) then
-                    gc:setColorRGB(0,0,0)
-                    gc:drawString("Klaffung k2 δ_x:", b - 160, current_y)
-                    gc:drawString("Klaffung k2 δ_y:", b - 160, current_y + 20)
-                    local u1x, u1y, u2x, u2y = getKinematicDisp_Stab(menuIndex)
-                    local n_ux, n_uy = getKinematicDisp(s.k2)
-                    gc:setColorRGB(0, 120, 0)
-                    gc:drawString(string.format("%.4f", u2x - n_ux), b - 60, current_y)
-                    gc:drawString(string.format("%.4f", u2y - n_uy), b - 60, current_y + 20)
-                    current_y = current_y + 40
-                end
-                
-                local is_1last_stab = false
-                local is_1last_node = false
-                local w_1last_stab = 0
-                local w_1last_node = 0
-                local proj_1last_stab = 0
-                local proj_1last_node = 0
-                local force_type = ""
-                
-                if pvv_released_binding and (pvv_released_binding.type == "q_gelenk" or pvv_released_binding.type == "n_gelenk" or pvv_released_binding.type == "m_gelenk") then
-                    local b_stab = staebe[pvv_released_binding.stab]
-                    local nodeIdx = pvv_released_binding.endA and b_stab.k1 or b_stab.k2
-                    
-                    if menuIndex == pvv_released_binding.stab or (s.k1 == nodeIdx or s.k2 == nodeIdx) then
-                        if pvv_released_binding.type == "m_gelenk" then
-                            if menuIndex == pvv_released_binding.stab then
-                                local s_phi = kinematic_disk_states and kinematic_disk_states[s.scheibe] and kinematic_disk_states[s.scheibe].type == "rot" and kinematic_disk_states[s.scheibe].phi or 0
-                                proj_1last_stab = -s_phi
-                                w_1last_stab = 1.0 * proj_1last_stab
-                                is_1last_stab = true
-                                force_type = "M"
-                            elseif menuIndex ~= pvv_released_binding.stab then
-                                local n_phi = getKinematicRot and getKinematicRot(nodeIdx) or 0
-                                proj_1last_node = n_phi
-                                w_1last_node = -1.0 * proj_1last_node
-                                is_1last_node = true
-                                force_type = "M"
-                            end
-                        else
-                            local dx, dy = knoten[b_stab.k2].x - knoten[b_stab.k1].x, knoten[b_stab.k2].y - knoten[b_stab.k1].y
-                            local L = math.sqrt(dx^2 + dy^2)
-                            if L > 0 then
-                                local nx, ny = dx/L, dy/L
-                                if pvv_released_binding.type == "q_gelenk" then nx, ny = -ny, nx end
-                                local dir = pvv_released_binding.endA and -1 or 1
-                                local ax, ay = nx * dir, ny * dir
-                                
-                                if menuIndex == pvv_released_binding.stab then
-                                    local u1x, u1y, u2x, u2y = getKinematicDisp_Stab(menuIndex)
-                                    local rx = pvv_released_binding.endA and u1x or u2x
-                                    local ry = pvv_released_binding.endA and u1y or u2y
-                                    proj_1last_stab = ax * rx + ay * ry
-                                    w_1last_stab = 1.0 * proj_1last_stab
-                                    is_1last_stab = true
-                                    force_type = (pvv_released_binding.type == "q_gelenk") and "Q" or "N"
-                                elseif menuIndex ~= pvv_released_binding.stab then
-                                    local n_ux, n_uy = getKinematicDisp(nodeIdx)
-                                    proj_1last_node = ax * n_ux + ay * n_uy
-                                    w_1last_node = -1.0 * proj_1last_node
-                                    is_1last_node = true
-                                    force_type = (pvv_released_binding.type == "q_gelenk") and "Q" or "N"
-                                end
-                            end
-                        end
-                    end
-                end
-                
-                if has_load or is_1last_stab or is_1last_node then
-                    gc:setColorRGB(0,0,0)
-                    gc:drawString("Arbeit W_i:", b - 160, current_y)
-                    gc:setColorRGB(200, 50, 50)
-                    current_y = current_y + 20
-                    local w_ges_parts = {}
-                    if type(w_str) == "table" then
-                        for _, term in ipairs(w_str) do
-                            gc:drawString(term, b - 160, current_y)
-                            local eq_part = term:gsub("^[^:]+:%s*", "")
-                            table.insert(w_ges_parts, eq_part)
-                            current_y = current_y + 15
-                        end
-                    end
-                    if is_1last_stab then
-                        gc:drawString(string.format("W_%s: %s * %.2f", force_type, force_type, proj_1last_stab), b - 160, current_y)
-                        table.insert(w_ges_parts, string.format("%s*%.2f", force_type, proj_1last_stab))
-                        current_y = current_y + 15
-                    end
-                    if is_1last_node then
-                        gc:drawString(string.format("W_%s: %s * %.2f", force_type, force_type, proj_1last_node), b - 160, current_y)
-                        table.insert(w_ges_parts, string.format("%s*%.2f", force_type, proj_1last_node))
-                        current_y = current_y + 15
-                    end
-                    current_y = current_y + 5
-                    gc:setColorRGB(0, 0, 0)
-                    gc:drawLine(b - 160, current_y - 2, b - 10, current_y - 2)
-                    gc:drawString("Summe W:", b - 160, current_y + 5)
-                    gc:setFont("sansserif", "r", 8)
-                    gc:setColorRGB(200, 50, 50)
-                    gc:drawString(table.concat(w_ges_parts, " + "), b - 160, current_y + 20)
-                    gc:setFont("sansserif", "r", 9)
-                end
+                gc:drawString("Stab " .. menuIndex .. " (PvV-Modus)", b - 160, 15)
+                pvvZeichneMenue(gc, "stab", menuIndex, b)
             else
                 gc:drawString("Stab " .. menuIndex .. " < S." .. menuSeite .. "/7 >", b - 160, 15); gc:setFont("sansserif", "r", 9)
                 if menuSeite == 1 then
@@ -9950,6 +11039,7 @@ function on.paint(gc)
                 gc:drawString("Bogen-Segmente:", b - 200, 140)
                 gc:drawString("Zahlen-Format:", b - 200, 160)
                 gc:drawString("Maximalwerte an/aus:", b - 200, 180)
+                gc:drawString("Rasterpunkte:", b - 200, 200)
 
                 gc:setColorRGB(0, 0, 255)
                 if menuZeile == 1 and eingabeModus then gc:drawString(eingabeText .. "_", b - 80, 40) else gc:drawString(tostring(casToleranz), b - 80, 40) end
@@ -9974,6 +11064,8 @@ function on.paint(gc)
                 gc:setColorRGB(0, 0, 255)
                 if menuZeile == 8 then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
                 gc:drawString(zeigeMaxWerte and "An" or "Aus", b - 80, 180)
+                if menuZeile == 9 then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
+                gc:drawString((rasterPunkte == 0) and "Keine" or ((rasterPunkte == 2) and "Dick" or "Normal"), b - 80, 200)
             elseif menuSeite == 4 then
                 gc:drawString("Polstrahle zeichnen:", b - 200, 40)
                 gc:setColorRGB(0, 0, 255)
@@ -10001,6 +11093,22 @@ function on.paint(gc)
                 gc:drawString("Starre Staebe (Export):", b - 200, 100)
                 if menuZeile == 4 then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
                 gc:drawString(randStarrDirekt and "direkt" or "Grenzwert", b - 80, 100)
+                gc:setColorRGB(0, 0, 0)
+                gc:drawString("System speichern als:", b - 200, 120)
+                gc:drawString("System öffnen:", b - 200, 140)
+                local nrText = letzteSystemNr and ("system" .. letzteSystemNr) or "Nr. eingeben"
+                for z = 5, 6 do
+                    if menuZeile == z and eingabeModus then
+                        gc:setColorRGB(0, 0, 255); gc:drawString(eingabeText .. "_", b - 80, 20 + 20 * z)
+                    else
+                        if menuZeile == z then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
+                        gc:drawString(nrText, b - 80, 20 + 20 * z)
+                    end
+                end
+                gc:setColorRGB(0, 0, 0)
+                gc:drawString("Variablen loeschen:", b - 200, 160)
+                if menuZeile == 7 then gc:setColorRGB(200, 0, 0) else gc:setColorRGB(0, 0, 255) end
+                gc:drawString((varLoeschFrage and menuZeile == 7) and "Sicher? Enter" or "Loeschen", b - 80, 160)
             end
         end
     end

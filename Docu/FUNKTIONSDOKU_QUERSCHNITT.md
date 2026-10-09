@@ -119,7 +119,11 @@ Sie beschreibt zu jeder Funktion: **Zweck**, **Moeglichkeiten** und **Grenzen/be
 - **Grenzen:** Loch-Elemente (`elem.is_hole`) liefern negierte Werte; unbekannter Typ liefert Nullwerte.
 
 ### `get_thin_props(elem)`
-- **Zweck:** Dispatcher fuer duennwandige Elemente (`duenn_kreis`, `duenn_kreis_bogen` oder gerade Linie via `thin_line_props`).
+- **Zweck:** Dispatcher fuer duennwandige Elemente (`duenn_kreis`, `duenn_kreis_bogen` oder gerade Linie via `thin_line_props`). `finish_shape` legt Kreise und Boegen des Duennwandmenues jetzt in `duenn_elemente` (mit `t = default_t`) ab; vorher landeten sie in `massiv_elemente`.
+
+### `duennKurve` (Tabelle)
+- **Zweck:** Hilfen fuer duennwandige Kreise und Boegen: `gekruemmt`, `kreis` (Mittelpunkt, R, Startwinkel, Oeffnungswinkel), `abstand` (Hover), `punkte` (Polylinie fuer die sigma-Ansicht), `rohr` (genau ein Vollkreis = Kreisrohr), `verbunden` (Kreis/Bogen haengt an einem anderen Element).
+- **Moeglichkeiten:** `find_closed_cells` liefert fuer das Kreisrohr A_m = pi R^2, Int ds/t = 2 pi R/t; `berechneSchubmittelpunkt` den Mittelpunkt; `berechneTorsionsResultat` lehnt Kreise neben anderen Elementen und angeschlossene Boegen ab.
 - **Grenzen:** Kreisbogen-Traegheitsmomente ueber trigonometrische Integrale, keine geschlossene Fallback-Naeherung bei extrem kleinem Radius (`R < 1e-5` -> Nullwerte).
 
 ### `berechneNumerisch(elem, index_of_elem)`
@@ -254,12 +258,8 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 - **Zweck:** Erweiterung der σx-Ergebnistabelle. `kennwerte` bildet aus der internen Spannungsebene (`s_u`, `s_v` wie in `drawSigmaOverlay`) den Gradienten im angezeigten KOS (`cy`, `cz` ueber `coordinatesForDisplay`), die Konstante `c0` am KOS-Ursprung, den Hauptachsenwinkel `phi = alphaForDisplay(alpha)`, `I_eta`/`I_zeta` (Formelsammlung 1.3), die Momente `M_eta`/`M_zeta` (wie Koordinaten gedreht) und den Gradienten im HAS (`c_eta`, `c_zeta`). `lineareForm` schreibt `a + b·x1 - c·x2` mit vier Stellen, `nulllinie` loest `a + b x1 + c x2 = 0` nach `x2` (oder `x1 = n`). `zusatzzeilen` liefert die Zeilen fuer die Tabelle (Zeilentypen `{Name, Wert}`, `{kopf = ...}`, `{voll = ...}`); Koeffizienten werden in die Laengeneinheit der Anzeige umgerechnet.
 - **Grenzen:** Winkel `phi` gilt fuer `I_eta = I_1`; bei `I_1 = I_2` ist jede Richtung Hauptachse (dann `phi = 0`).
 
-### `openSigmaFromForces()`
-- **Zweck:** Direkte σx-Auswertung ausschliesslich aus den bereits platzierten Kraeften (analog zur Schubspannungs-Kraftauswertung). Haben die Kraefte eine Querkomponente, fragt eine Maske nur `Δx` ab, sonst wird sofort gerechnet.
-- **Grenzen:** Setzt `sigma_N/My/Mz` auf 0 und nutzt ausschliesslich die Kraft-Resultierenden; wird nur angeboten, wenn `#kraefte > 0`.
-
 ### `openSigmaInput(oblique)` / `enterSigmaInput()`
-- **Zweck:** Mehrstufige manuelle Eingabemaske fuer `N`, `My` (und bei `oblique=true` zusaetzlich `Mz`), bei eingezeichneten Querkraeften zuletzt `Δx` (Betrag). `drawSigmaInput` baut die Maske aus `sigmaEingabe.felder` (28 px Zeilenabstand, Hinweiszeile fuer `Δx`), damit auch vier Felder auf 212 px passen.
+- **Zweck:** Mehrstufige Eingabemaske fuer `N`, `My`, `Mz`, bei eingezeichneten Querkraeften zuletzt `Δx` (Betrag). Berechnungsmenue Zeile 3 ruft sie direkt mit `oblique = true` auf; das fruehere Untermenue (Seite 7 mit „σx aus Kraeften“, `openSigmaFromForces`) war nicht erreichbar und ist entfernt. Platzierte Kraefte addiert `finishSigmaCalculation` immer; σx nur aus Kraeften heisst also `N`, `My`, `Mz` = 0. `drawSigmaInput` baut die Maske aus `sigmaEingabe.felder` (28 px Zeilenabstand, Hinweiszeile fuer `Δx`), damit auch vier Felder auf 212 px passen.
 - **Moeglichkeiten:** Bereits bestaetigte Werte werden im Eingabedialog wieder in der aktuell eingestellten Anzeigeeinheit dargestellt; die interne Umrechnung in `N`/`Nmm` bleibt davon getrennt.
 - **Grenzen:** Reine Texteingabe ueber `evaluate_input`; keine Bereichspruefung der eingegebenen Werte.
 
@@ -276,6 +276,11 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 ### `kern_collect_points()`
 - **Zweck:** Sammelt alle relevanten Randpunkte (inkl. Kreis-/Bogen-Stuetzstellen) aller **nicht-Loch**-Massiv- und aller Duennwand-Elemente fuer Kernflaechen- und Sigma-Extremwertberechnung.
 - **Grenzen:** Bogen-Abtastung mit fester Schrittweite (~10° pro Stuetzpunkt); bei sehr kleinen Radien evtl. zu grob.
+
+### `kernHAS.richtungen()` / `kernHAS.koordinaten(u, v)`
+- **Zweck:** Hauptachsensystem wie in der σx-Tabelle (`sigmaEingabe.kennwerte`): Winkel `phi = alphaForDisplay(system_results.alpha)` von der angezeigten y-Achse, η = (cos φ, sin φ), ζ = (−sin φ, cos φ) im angezeigten KOS, über `coordinatesFromDisplay` in interne Einheitsvektoren umgerechnet. `koordinaten` projiziert einen internen Punkt relativ zum Schwerpunkt auf η und ζ.
+- **Verwendung:** gezeichnete Hauptachsen 1/2 im KOS-Bild, Achsenabschnitte der umhuellenden Geraden (`drawKern`, Modus 1: `t = d / (n·e)` je Achse, sonst `drawInfArrow` entlang der Achse) und HAS-Koordinaten der Kernpunkte (Modus 2, zusammen mit den KOS-Koordinaten).
+- **Grenzen:** Bei I_1 = I_2 ist jede Richtung Hauptachse; dann gilt `alpha = 0`, die Achsen liegen parallel zum KOS.
 
 ### `kern_build()`
 - **Zweck:** Baut aus der konvexen Huelle der Randpunkte (Monotone-Chain-Algorithmus) die Kernflaechen-Geometrie: umhuellende Geraden (`kern_lines`) und Kernflaechen-Polygon (`kern_pts`/`kern_vertices`), inkl. Sonderfall Vollkreis und Bogenkanten.
@@ -361,7 +366,8 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 ## 9. Menü- & Interaktionslogik
 
 ### `qsWerte` (Tabelle) mit `aktiv()`, `signatur()`, `pruefe()`, `anwenden()`, `anzeige()`, `namen()`
-- **Zweck:** Manuell ueberschriebene Schwerpunktwerte `A`, `Iy`, `Iz`, `Iyz` im internen KOS (Eingabe im Obermenue Seite 3 = `menuPage 10`, Umrechnung aus dem angezeigten KOS: bei Drehung 90/270 tauschen `Iy`/`Iz`, `Iyz` wechselt das Vorzeichen). `pruefe()` laeuft am Anfang von `berechneSystem`: weicht `signatur()` (Typen, Dicken, Marken, Punkte relativ zum ersten Punkt) von der gemerkten ab, fallen die Werte weg (einmaliger Hinweis). `anwenden()` laeuft nach dem Aufbau von `system_results`: setzt `A`, `Iy/IyS`, `Iz/IzS`, `Iyz/IyzS`, bildet `I1`, `I2`, `alpha`, `Wu`, `Wv` (mit den gespeicherten Randabstaenden `e_u`, `e_v`) neu, merkt die geometrischen Werte in `r.geo`. `anzeige()` liefert die Marken fuer die angezeigten Groessen, `namen()` die Liste fuer Hinweise.
+- **Zweck:** Manuell ueberschriebene Schwerpunktwerte `A`, `Iy`, `Iz`, `Iyz` im internen KOS (Eingabe im Obermenue Seite 3 = `menuPage 10`, Umrechnung aus dem angezeigten KOS: bei Drehung 90/270 tauschen `Iy`/`Iz`, `Iyz` wechselt das Vorzeichen). `pruefe()` laeuft am Anfang von `berechneSystem`: weicht `signatur()` (Typen, Dicken, Marken, Punkte relativ zum ersten Punkt) von der gemerkten ab, fallen die Werte weg (einmaliger Hinweis). `anwenden()` laeuft nach dem Aufbau von `system_results`: setzt `A`, `Iy/IyS`, `Iz/IzS`, `Iyz/IyzS`, bildet `I1`, `I2`, `alpha`, `Wu`, `Wv` (mit den gespeicherten Randabstaenden `e_u`, `e_v`) neu, merkt die geometrischen Werte in `r.geo` (auch `ys`, `zs`). `anzeige()` liefert die Marken fuer die angezeigten Groessen (fuenfter Rueckgabewert: Schwerpunkt manuell), `namen()` die Liste fuer Hinweise.
+- **Schwerpunkt (`ys`, `zs`):** Menue Seite 3, Zeilen 5/6 (Zeile 7 wiederherstellen ueber `loescheManuelleWerte()`, Zeile 8 zurueck). Eingabe im angezeigten KOS (`coordinatesFromDisplay`, `input_to_internal`), gespeichert relativ zu `qsWerte.bezugspunkt()` (erster Punkt des ersten massiven, sonst duennwandigen Elements), damit er beim KOS-Verschieben am Querschnitt haengen bleibt. `anwenden()` setzt `r.ys`, `r.zs` und bildet `e_u`, `e_v` aus `r.bbox` neu. Damit nehmen `berechneKraftResultanten` (Hebel der Normalkraefte), σx, Kernflaeche und `Wu`/`Wv` den gesetzten Schwerpunkt. `qsWerte.geoSicht(r)` liefert eine Sicht mit `r.geo.ys/zs` (Metatable auf `r`); sie wird in `displayedMomentDensity`, `berechneDuenneSchubspannung`, `berechneSchubmittelpunkt`, `woelb.berechne`, `berechneSchubspannungsResultate`, `berechneSchubMomentTabelle` und der Einzelwerte-Tabelle benutzt, weil dort ueber die gezeichneten Waende integriert wird und das statische Moment nur um deren eigenen Schwerpunkt null ist. Traegheitsmomente werden nicht verschoben (kein Steiner). Test: `querschnitt.lua` Fall 47.
 - **Grenzen:** Der Schwerpunkt, die statischen Momente und `I_T` bleiben geometrisch. Eingaben muessen `A, I_y, I_z > 0` und `I_y I_z - I_yz^2 > 0` erfuellen.
 
 ### `ftm_bezug` (Obermenue Seite 2, Zeile 4 `FTM-Bezug`)
@@ -371,7 +377,7 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 - **Zweck:** `on.clearKey` setzt nur `qsLoeschFrage` und zeichnet die Rueckfrage; `on.enterKey` ruft `loescheAllesQS()` (der bisherige Inhalt von `clearKey`), `on.escapeKey` bricht ab. Bei leerem Querschnitt wird ohne Rueckfrage geloescht. Der Weg `Esc` + `Backspace` (`escape_clear_pending`) laeuft ueber dieselbe Rueckfrage.
 
 ### `meldung(text, titel, fehler)` / `qsMeldung`
-- **Zweck:** Meldung sichtbar machen: setzt `status` und die globale Box `qsMeldung = { titel, text, fehler }`, die `on.paint` in der Hauptansicht zeichnet (rot bei `fehler`, sonst gelb, Text umgebrochen). `on.escapeKey` schliesst zuerst die Box; `berechneSystem` und die `open...Input`-Funktionen setzen sie zurueck.
+- **Zweck:** Meldung sichtbar machen: setzt `status` und die globale Box `qsMeldung = { titel, text, fehler, scroll = 0, scrollMax = 0 }`, die `on.paint` ueber `zeichneQsMeldung(gc, w, h)` in der Hauptansicht zeichnet (rot bei `fehler`, sonst gelb, Text umgebrochen). Ist der Text laenger als der Bildschirm, zeichnet `zeichneQsMeldung` nur die Zeilen ab `scroll`, setzt `scrollMax`, zeigt den Zeilenzaehler `a-b/n` und Dreiecke fuer weiteren Text; `on.arrowKey` verschiebt `scroll` mit hoch/runter (vor allen anderen Pfeiltastenfunktionen). `on.escapeKey` schliesst zuerst die Box; `berechneSystem` und die `open...Input`-Funktionen setzen sie zurueck.
 - **Grenzen:** `status` selbst wird nirgends gezeichnet (es gibt keine Statuszeile); nur ueber `meldung` gesetzte Texte sind sichtbar. In den Eingabe- und Tabellenansichten (fruehe Rueckkehr aus `on.paint`) wird die Box nicht gezeichnet.
 
 ### `toggleCalculationMenu()`
