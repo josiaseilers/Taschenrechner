@@ -122,8 +122,8 @@ Sie beschreibt zu jeder Funktion: **Zweck**, **Moeglichkeiten** und **Grenzen/be
 - **Zweck:** Dispatcher fuer duennwandige Elemente (`duenn_kreis`, `duenn_kreis_bogen` oder gerade Linie via `thin_line_props`). `finish_shape` legt Kreise und Boegen des Duennwandmenues jetzt in `duenn_elemente` (mit `t = default_t`) ab; vorher landeten sie in `massiv_elemente`.
 
 ### `duennKurve` (Tabelle)
-- **Zweck:** Hilfen fuer duennwandige Kreise und Boegen: `gekruemmt`, `kreis` (Mittelpunkt, R, Startwinkel, Oeffnungswinkel), `abstand` (Hover), `punkte` (Polylinie fuer die sigma-Ansicht), `rohr` (genau ein Vollkreis = Kreisrohr), `verbunden` (Kreis/Bogen haengt an einem anderen Element).
-- **Moeglichkeiten:** `find_closed_cells` liefert fuer das Kreisrohr A_m = pi R^2, Int ds/t = 2 pi R/t; `berechneSchubmittelpunkt` den Mittelpunkt; `berechneTorsionsResultat` lehnt Kreise neben anderen Elementen und angeschlossene Boegen ab.
+- **Zweck:** Hilfen fuer duennwandige Kreise und Boegen: `gekruemmt`, `kreis` (Mittelpunkt, R, Startwinkel, Oeffnungswinkel), `abstand` (Hover), `punkte` (Polylinie fuer die sigma-Ansicht), `rohr` (genau ein Vollkreis = Kreisrohr). Fuer den Profilgraph: `sehne` (pi/12, groesste Sehne), `stuetz` (16 Stuetzstellen je Bogensehne), `bogenDaten`, `geradenTeilung`, `bogenTeilung` (siehe `duennGraph`), `bogenpunkt(edge, rueckwaerts, f)` (Lage, Tangente in Laufrichtung, Normale nach aussen, Winkel), `bogenMomente(edge, rueckwaerts, f1, f2, u0, v0)` (Int (u-u0) ds und Int (v-v0) ds geschlossen), `bogenR(edge, rueckwaerts, f, pu, pv)` (Int r_perp ds geschlossen). Das fruehere `verbunden` (Ablehnung angeschlossener Boegen bei der Torsion) ist entfallen.
+- **Moeglichkeiten:** `find_closed_cells` liefert fuer das Kreisrohr A_m = pi R^2, Int ds/t = 2 pi R/t (Sonderweg, exakt, gleich der Sehnenkette); `berechneSchubmittelpunkt` den Mittelpunkt.
 - **Grenzen:** Kreisbogen-Traegheitsmomente ueber trigonometrische Integrale, keine geschlossene Fallback-Naeherung bei extrem kleinem Radius (`R < 1e-5` -> Nullwerte).
 
 ### `berechneNumerisch(elem, index_of_elem)`
@@ -158,15 +158,17 @@ Symmetrieachse kommt q0 aus der Vertraeglichkeit (∮ q/(G t) ds = 0), also ohne
 werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 
 ### `duennGraph(achse_u, achse_v)`
-- **Zweck:** Mittelliniengraph aller geraden `duenn_elemente`. Elemente werden an Schnitt- und Beruehrpunkten (T-Knoten, Kreuzungen, kollineare Ueberlappungen) und optional an den Achsen `u = achse_u`, `v = achse_v` geteilt. Doppelt gezeichnete Kanten werden zu einer Kante mit addierter Dicke zusammengelegt.
-- **Grenzen:** Duennwandige Kreise/Boegen werden nicht als Kanten abgebildet (`nicht_gerade`); Schub wird dann abgelehnt.
+- **Zweck:** Mittelliniengraph aller `duenn_elemente`. Gerade Elemente werden an Schnitt- und Beruehrpunkten (T-Knoten, Kreuzungen, kollineare Ueberlappungen) und optional an den Achsen `u = achse_u`, `v = achse_v` geteilt. Doppelt gezeichnete gerade Kanten werden zu einer Kante mit addierter Dicke zusammengelegt (Bogenkanten nie).
+- **Kreise und Boegen (Sehnenkette):** `duennKurve.bogenDaten` (C, R, a1, diff, Enden e1 = P2, e2 auf dem Radius in Richtung P3). `duennKurve.geradenTeilung` teilt Geraden an Bogenenden in ihrem Inneren (T-Stoss, Abstand <= 1e-6), an Kreuzungen und an Beruehrungen (Tangente) im Inneren beider und merkt je Bogen `links = {gerade, s, ende}`. Nach dem Sortieren der Geradenparameter legt `duennKurve.bogenTeilung` die Teilpunkte `b.teil = {{w, p}}` fest: Enden (e2 faengt einen Endpunkt eines anderen Elements, der genau auf P3 liegt oder bis 1e-4 R am berechneten Ende), Knoten aus `links` genau auf dem Geradenknoten (gleiche Rechnung wie in `duennGraph`), Endpunkte anderer Elemente auf dem Bogen (Lage = Endpunkt), Kreuzungen zweier Boegen im Inneren beider (Kreis-Kreis-Schnitt, beide bekommen denselben Punkt), Achsenschnitte (`acos`, `asin`); Vollkreis: Start auf einem Teilpunkt (sonst Knoten 1 bei Winkel 0). Je Stueck `n = max(2, ceil(dw/sehne))` gleiche Sehnen; jede Sehnenkante traegt `bogen = {C, R, w1, w2}` (w1 bei n1), `L = R dw`, `seg2 = R^2 (dw - sin dw)` (doppelte Segmentflaeche, positiv fuer den Lauf n1 -> n2), `stueck`, `pfeil` (mittlere Sehne).
+- **Gerade/Gerade:** geteilt wird nur noch an echten Schnittpunkten (Parameter auf beiden Strecken in [0, 1]). Frueher teilte auch der Schnitt mit der Verlaengerung der anderen Strecke; bei feinen Polygonen entstanden viele Scheinknoten, `add_parameter` legte den echten Schnitt auf einen davon, und der Knoten fiel nicht mehr mit dem der anderen Strecke zusammen (Zelle nicht erkannt).
+- **Grenzen:** `nicht_gerade` nur noch fuer unbekannte Elementtypen. Ueberlappende gleiche Boegen (gleicher Kreis) werden nicht zusammengelegt.
 
 ### `duennZellen(nodes, edges)`
-- **Zweck:** Schneidet freie Aeste ab und bestimmt die Zellenzahl `Kanten - Knoten + Komponenten` des Restgraphen. Bei genau einer Zelle: Umlauf mit `A_m`, `∮ds/t`, `t_min`, Umlaufsinn je Kante und `I_T = 4 A_m^2/∮ds/t` (Bredt).
+- **Zweck:** Schneidet freie Aeste ab und bestimmt die Zellenzahl `Kanten - Knoten + Komponenten` des Restgraphen. Bei genau einer Zelle: Umlauf mit `A_m`, `∮ds/t`, `t_min`, Umlaufsinn je Kante und `I_T = 4 A_m^2/∮ds/t` (Bredt). Bogensehnen: `area2 += seg2` (Vorzeichen nach Laufrichtung) und Laenge `L` statt der Sehne, beides exakt.
 
 ### `duennSymmetrie(nodes, edges, ys, zs)`
 - **Zweck:** Prueft Spiegelsymmetrie des Graphen inklusive Wanddicken zur senkrechten Achse `u = ys` (`sym_v`) und zur waagerechten Achse `v = zs` (`sym_h`). Ersetzt die fruehere Pruefung `|I_yz| < 1e-5`, die keine Symmetrie nachweist.
-- **Verfahren:** Jede Kante wird in 13 Punkten abgetastet; der gespiegelte Punkt muss auf einer Kante gleicher Dicke liegen (Punkt-auf-Strecke, Toleranz `1e-6 * Ausdehnung`). Dadurch ist die Erkennung unabhaengig davon, wie die beiden Haelften in Segmente geteilt sind (frueher wurde Kante gegen Kante verglichen, eine anders unterteilte Haelfte galt als unsymmetrisch).
+- **Verfahren:** Jede Kante wird in 13 Punkten abgetastet (Bogensehnen in 3: Enden und Mitte); der gespiegelte Punkt muss auf einer Kante gleicher Dicke liegen (Punkt-auf-Strecke, Toleranz `1e-6 * Ausdehnung`). Dadurch ist die Erkennung unabhaengig davon, wie die beiden Haelften in Segmente geteilt sind (frueher wurde Kante gegen Kante verglichen, eine anders unterteilte Haelfte galt als unsymmetrisch).
 
 ### Zellschnitt in `berechneDuenneSchubspannung` (`schnittAufAchse`)
 - **Zweck:** Der Schnitt der geschlossenen Zelle wird auf die Symmetrieachse gelegt (Knoten mit `|u - ys| < tol` bzw. `|v - zs| < tol`, der durch die Kantenteilung in `duennGraph(ys, zs)` bereits existiert). Dort ist der Schubfluss null, die Laufvariable startet bei `S = 0`. Die Achse richtet sich nach der groesseren Querkraftkomponente. Erfolg steht in `info.schnitt_auf_achse`, der Pfad bekommt `start_kind = "cut_sym"` (Anzeige "Start (Symmetrieachse)"), sonst `"cut"`.
@@ -186,6 +188,7 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 - **Ablauf:** (1) von allen freien Enden (q = 0), (2) an Verzweigungen mit nur noch einem offenen Ast Start mit der Summe der angekommenen statischen Momente, (3) eine geschlossene Zelle an beliebiger Stelle aufschneiden, (4) Zellschubfluss `q0` je Komponente aus der Symmetrie: fuer eine Querkraft parallel zur Symmetrieachse ist q im Umlaufsinn antisymmetrisch, `q(P) + q(P') = 0` fuer Spiegelpunkte. Das erfuellt automatisch die Vertraeglichkeit `∮τ ds = 0` (im Test geprueft).
 - **Formel:** mit `I_yz`-Kopplung `τ_a = -Q_a (I_y S_a + I_yz S_b)/((I_y I_z - I_yz^2) t)`, `τ_b = -Q_b (I_z S_b + I_yz S_a)/((I_y I_z - I_yz^2) t)` (Gross-Vorzeichen `I_yz = -∫uv dA`; fuer `I_yz = 0` die bekannte Form `τ = -Q S/(I t)`).
 - **Rueckgabe:** `maximum, samples, paths, fehler, info`. Samples tragen zusaetzlich `in_cell`, `cell_sign` (Umlaufsinn), `edge_i`, `fwd`.
+- **Bogensehnen (`integrate_arc`):** `duennKurve.stuetz` (16) Stuetzstellen auf dem Bogen (`duennKurve.bogenpunkt`: Lage, Tangente in Laufrichtung, Anzeige-Normale radial nach aussen), `ds = L/16` mit der Bogenlaenge, statische Momente geschlossen (`duennKurve.bogenMomente`). Symmetriekorrektur, Vertraeglichkeit (Simpson je Sehne) und Schubmittelpunkt laufen unveraendert ueber die Stuetzstellen; Abweichung gegen Handrechnung etwa 1e-9 (Fall 59).
 - **Grenzen:** mehrzellig: `nil` und Begruendung in `fehler`. Unsymmetrische Zellen und Querkraft quer zur einzigen Achse werden ueber die Vertraeglichkeit gerechnet (`info.erkannt` nennt die gefundenen Achsen fuer die Warnung).
 
 ### `berechneSchubmittelpunkt()`
@@ -196,7 +199,7 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 - **Grenzen:** Statisch unbestimmte Lastrichtungen liefern keine Beitraege.
 
 ### `berechneTorsionsResultat(moment)`
-- **Zweck:** Torsion nur fuer rein duennwandige Profile: offen `I_T = Σ ξ/3 h t^3`, `τ_max = M_T t_max/I_T`; einzellig geschlossen (Bredt) `τ_max = M_T/(2 A_m t_min)` mit `t_min` der Zellwaende.
+- **Zweck:** Torsion nur fuer rein duennwandige Profile: offen `I_T = Σ ξ/3 h t^3`, `τ_max = M_T t_max/I_T`; einzellig geschlossen (Bredt) `τ_max = M_T/(2 A_m t_min)` mit `t_min` der Zellwaende. Kreise und Boegen gehen ueber den Profilgraph ein (frueher: Ablehnung, sobald ein Bogen an ein anderes Element anschloss).
 - **Grenzen:** Massive oder gemischte Querschnitte (keine Prandtl-Loesung) und mehrzellige Profile: `nil` mit Meldung.
 
 ### `aktualisiereTorsionsverlauf(result)`, `torsionTauAtSample(sample)`, `combinedTauAtSample(sample)`
@@ -208,15 +211,23 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 
 ### `woelb.berechne(M, G)`
 - **Zweck:** Verwoelbung u_x(s) duennwandiger Profile nach Formelsammlung Kap. 6: `u_x = Int [MT/(2 G A_m h) - r_perp theta] ds + c`, `theta = MT/(G I_T)`. Pol ist der Schubmittelpunkt; `r_perp = (u-u_M) t_v - (v-v_M) t_u` (Kreuzprodukt, positiv im Umlaufsinn des Bredt-Schubflusses, `ccw_dir`). Geschlossen: `I_T` nach Bredt und Bredt-Anteil `sign * qT/(G h)` je Zellkante; offen: `I_T = r.It` und kein Bredt-Anteil.
-- **Ablauf:** Graph aus `duennGraph(ys, zs)`, Breitensuche ab einem Knoten auf einer Symmetrieachse (sonst Knoten 1); je Kante geschlossene Integration (`u(s) = u0 + bredt s - theta (r1 s + (r2-r1) s^2/(2L))`), Stuetzstellen wie beim Schub (gerade Intervallzahl), nicht zusammenhaengende Teile bekommen eigene Startknoten. `c` aus `Int u h ds = 0` mit Simpson je Kante. Rueckgabe u. a. `samples` (mit `ux`, `r_perp`), `paths`, `theta`, `It`, `Am`, `closed`, `pol`, `max_abs/max_u/max_v`, `schluss` (Probe: Umlauf der Zelle schliesst).
-- **Grenzen:** `nil, fehler` fuer massiv/gemischt, Kreisboegen, mehrzellig, `I_T = 0`, unbestimmten Schubmittelpunkt. Keine Woelbkrafttorsion.
+- **Ablauf:** Graph aus `duennGraph(ys, zs)`, Breitensuche ab einem Knoten auf einer Symmetrieachse (sonst Knoten 1); je Kante geschlossene Integration (`u(s) = u0 + bredt s - theta (r1 s + (r2-r1) s^2/(2L))`), Stuetzstellen wie beim Schub (gerade Intervallzahl), nicht zusammenhaengende Teile bekommen eigene Startknoten. `c` aus `Int u h ds = 0` mit Simpson je Kante. Rueckgabe u. a. `samples` (mit `ux`, `r_perp`), `paths`, `theta`, `It`, `Am`, `closed`, `pol`, `max_abs/max_u/max_v`, `schluss` (Probe: Umlauf der Zelle schliesst). Bogensehnen: `L` = Bogenlaenge, `Int r_perp ds` geschlossen (`duennKurve.bogenR`), 16 Stuetzstellen auf dem Bogen mit `abschnitt = "b<Element>:<Stueck>"` und `ordnung` = Winkel, damit `verlaufAbschnitte` je Bogenstueck einen Verlauf zeichnet.
+- **Grenzen:** `nil, fehler` fuer massiv/gemischt, mehrzellig, `I_T = 0`, unbestimmten Schubmittelpunkt. Keine Woelbkrafttorsion.
 
 ### `woelb.oeffnen()` / `woelb.eingabe()`
 - **Zweck:** Dialog unter `b` -> 7: Schritt 1 `MT` in `moment_unit` (vorbelegt mit `berechneKraftTorsion().M`, falls Kraefte eingetragen sind), Schritt 2 `G` in N/mm^2 (vorbelegt 81000). Ergebnis in `woelb.results`, Ansicht `woelb.visible`; der Schubverlauf wird ausgeblendet. Offenes Profil: Warnung "nicht in der Formelsammlung".
 - **Grenzen:** `woelb.M` wird bewusst nicht in `torsion_M`/`torsion_results` uebernommen; `Esc` schliesst Dialog bzw. Ansicht und verwirft `woelb.results`, `berechneSystem()` ebenfalls (Geometrie geaendert).
 
 ### `berechneSchubspannungsResultate(input_Qa, input_Qb)`
-- **Zweck:** Gesamtfunktion Schub. Eingaben beziehen sich auf das angezeigte KOS und werden intern gedreht; eingetragene Kraefte kommen hinzu. Massiv: `τ = Q S/(I b)` ueber waagerechte/senkrechte Schnitte (Breiten auch fuer Sektor, Kreisabschnitt und dicke Linie ueber `massiv_outline_polygon`), nur bei `I_yz = 0`. Gemischt massiv/duennwandig: abgelehnt. Begruendungen landen in `schub_grund` bzw. `status`.
+- **Zweck:** Gesamtfunktion Schub. Eingaben beziehen sich auf das angezeigte KOS und werden intern gedreht; eingetragene Kraefte kommen hinzu. Massiv: `τ = Q S/(I b)` ueber waagerechte/senkrechte Schnitte, nur bei `I_yz = 0`; je Richtung `qsMassiv.verlauf` und je Stuetzstelle `tau = |Q S/(I b)|`, an Spruengen (`bm` und `bp` verschieden, mehr als 1e-3 relativ) zwei Stuetzstellen mit der Breite darunter und darueber, Rand immer (tau = 0), innen ohne Material (b = 0) keine. Massive Stuetzstellen tragen `Sy` bzw. `Sz` (Verlaeufe 3/4). Gemischt massiv/duennwandig: abgelehnt. Begruendungen landen in `schub_grund` bzw. `status`.
+
+### `qsMassiv` (globale Tabelle): `laenge`, `knicke`, `verlauf`; `massiv_width_at_v(v)` / `massiv_height_at_u(u)`
+- **`qsMassiv.laenge(elem, c, senkrecht)`:** exakte Schnittlaenge der Geraden `v = c` (bzw. `u = c`) mit einem Element: Rechteck als Intervall, Dreieck/Viereck/dicke Linie ueber `polygon_width_at_v`/`polygon_height_at_u` (dicke Linie ueber `massiv_outline_polygon`), Kreis `2 sqrt(R^2 - d^2)`, Kreisausschnitt als Kreisintervall geschnitten mit den Halbebenen der beiden Randstrahlen (ueber 180 Grad: Vereinigung), Kreisabschnitt mit der Halbebene der Sehne auf der Bogenseite. Frueher Sektor/Segment als 96-Eck.
+- **`qsMassiv.knicke(elem, senkrecht, liste)`:** Knickstellen der Breite (Ecken, Rechteckkanten, Kreisscheitel, Bogenenden, Sektormittelpunkt, Kreispunkte bei 0/90/180/270 Grad im Bogen).
+- **`qsMassiv.verlauf(lo, hi, s0, senkrecht, breite)`:** Stuetzstellen `{x, S, A, bm, bp}` von `lo` bis `hi`. Grenzen: Knickstellen aller Elemente, die Schwerachse `s0` und die Raender; je Intervall gleich geteilt (zusammen etwa 160 Streifen, mindestens 2 je Intervall). `A` und `S` (Flaeche bzw. statisches Moment um `s0` jenseits der Stelle) mit 3-Punkt-Gauss je Streifen, Streifen an einer Knickstelle zu ihr hin geometrisch unterteilt (1/256, 1/32, 1/4: Wurzelverhalten am Kreisscheitel). Der Rest `S(lo)` wird anteilig nach `A` abgezogen, `S` ist an beiden Raendern genau 0. `bm`/`bp` = Breite bei `x -+ 1e-9 H`.
+- **`massiv_width_at_v` / `massiv_height_at_u`:** Summe der `qsMassiv.laenge` aller Elemente, Loecher negativ, nicht unter 0.
+- **Frueher:** 160 gleiche Streifen, tau an der Streifenmitte mit der Breite dort, aber mit S bis zur Streifenunterkante. Oberster Wert nie 0 (Rechteck 2,5 %, Kreis 3,7 % von tau_max), Rand nie Stuetzstelle, Breitenspruenge innerhalb eines Streifens verfaelschten S.
+- **Test:** `querschnitt.lua` Fall 58 (Rechteck, Kreis, Dreieck, I-Profil mit Spruengen, Rechteck mit Loch, Halbkreisscheibe als Sektor und Segment, Sektor 270 Grad).
 
 ---
 
@@ -295,7 +306,13 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 
 ### `drawGrid(gc, w, h)`
 - **Zweck:** Zeichnet das Punktraster im sichtbaren Bereich.
-- **Grenzen:** Feste Rasteranzahl (61x49 Punkte um den Ursprung), nicht dynamisch an Zoom/Fenstergroesse angepasst.
+- **Grenzen:** Feste Rasteranzahl (61x49 Punkte um den Ursprung), nicht dynamisch an Zoom/Fenstergroesse angepasst. Liegen die Punkte weniger als 5 Pixel auseinander (`raster * scale < 5`), zeichnet sie nichts (sonst nur graue Flaeche).
+
+### `zeichneBemassungQS(gc, w, h)` (global)
+- **Zweck:** Masskette unten (Abstaende in u) und links (in v) wie `drawBemassung` im Tragwerksskript. Punkte je Element: Rechteck, Dreieck, Viereck, duenne Linie ihre `points`; `massiv_linie` der Umriss (`massiv_outline_polygon`); Kreis (massiv/duenn) Mittelpunkt plus `getBoundingBox`; Sektor, Bogen: P2, Bogenende in Richtung P3 auf dem Radius, Mittelpunkt, `getBoundingBox`; Kreisabschnitt ohne Mittelpunkt. `zeigeBemassung` (global): 0 aus, 1 an, 2 mit Schwerpunkt (`system_results.ys/zs`, violette Marke `S`). Lage: 38 Pixel unter dem tiefsten bzw. 30 Pixel links vom linkesten Punkt, auf den Bildschirm begrenzt; Abschnitte, die schmaler sind als ihre Zahl, bleiben ohne Zahl. Aus bei `shear_profile_visible`, `woelb.visible`, `sigma_results`, `kernMode > 0`. Aufruf in `on.paint` vor `drawShearProfile`. Test: `querschnitt.lua` Fall 49.
+
+### `formatKlein(v)` (global)
+- **Zweck:** Werte unter 0,01 und ab 10^6 als Mantisse mal Zehnerpotenz (`1.029·10^-4`), sonst `%.4g`; unter 1e-14 als `0`. Fuer die Verwoelbung (Verlauf ueber `quelle.format` in `drawVerlauf`, `u_x,max` und `theta` im Ergebnisfeld). Test: Fall 48.
 
 ### `drawShapePath(gc, elem)`
 - **Zweck:** Zeichnet die Grundflaeche eines Massiv-/Duennwand-Elements (fuer alle unterstuetzten Typen) inkl. Fuellung.
@@ -305,13 +322,13 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 
 ### `drawSpreadsheet(gc, w, h)`
 - **Zweck:** Zeichnet die rechte Ergebnisspalte (Flaeche, Schwerpunktkoordinaten, `Iy/Iz/Iyz` am aktuellen KOS-Ursprung, Traegheitsradien, Widerstandsmomente, `I1,S/I2,S` schwerpunktbezogen, Torsionskonstanten, Schubspannungs-/Torsions-Zusatzwerte).
-- **Grenzen:** Feste Spaltenbreite (`width = 210`); bei sehr vielen Zusatzzeilen (Schub+Torsion gleichzeitig) muss ggf. gescrollt werden (`results_scroll_y`).
+- **Grenzen:** Feste Spaltenbreite (`width = 210`); bei vielen Zusatzzeilen (Schub, Verwoelbung, Torsion) wird gescrollt (`results_scroll_y`). Die Funktion merkt die Hoehe des Inhalts in `ergebnisHoehe` (global); `on.arrowKey` begrenzt das Scrollen darauf. Vorher war die Grenze fest auf 19 Zeilen, das Ende langer Listen war nicht erreichbar (Test: Fall 50).
 
 ### `drawSigmaInput/ drawShearInput / drawTorsionInput(gc, w, h)`
 - **Zweck:** Zeichnen die jeweiligen mehrstufigen Texteingabemasken fuer σx-, Schub- und Torsionsberechnung.
 
 ### `verlaufAbschnitte(quelle)` / `drawVerlauf(gc, quelle)` / `drawLaufrichtung(gc, paths, hovered, korrigiert)`
-- **Zweck:** Gemeinsame Verlaufsdarstellung fuer Schub und Verwoelbung. `quelle` = `{ id, key, samples, wert(sample), anzeige(wert), titel, hovered, maximum, farbe }`. `verlaufAbschnitte` gruppiert die Stuetzstellen nach `path_id:segment`, sortiert nach `s`, wertet `wert` je Stuetzstelle einmal aus und merkt den Pixelversatz normal zur Wand (`fx, fy`, 36 px fuer den betragsgroessten Wert); der Cache (`verlauf.cache`, Breite `verlauf.breite`) haengt an `id`, `key`, `rotation` und `hovered`. `drawVerlauf` rechnet je Frame nur `toScreen`, duennt auf etwa einen Punkt je 1,5 px aus und zeichnet **eine Polylinie je Abschnitt**, dazu Wandverbinder, Endwerte, min/max (aus allen Stuetzstellen). `drawLaufrichtung` zeichnet Startmarken (Start / Start (Symmetrieachse) / Schnitt / Schnitt (q0 aus Verträglichkeit) / Schnitt (q0 offen)) und Laufrichtungspfeile.
+- **Zweck:** Gemeinsame Verlaufsdarstellung fuer Schub und Verwoelbung. `quelle` = `{ id, key, samples, wert(sample), anzeige(wert), titel, hovered, maximum, farbe }`. `verlaufAbschnitte` gruppiert aufeinanderfolgende Stuetzstellen nach `path_id:segment` (ausgeblendete Stuetzstellen beim Hover trennen Abschnitte, sonst verband eine Linie die beiden Haelften eines aufgeschnittenen Gurts), Stuetzstellen mit `abschnitt` (Verwoelbung auf Boegen) ueber eine Tabelle, sortiert nach `ordnung` bzw. `s`, wertet `wert` je Stuetzstelle einmal aus und merkt den Pixelversatz normal zur Wand (`fx, fy`, 36 px fuer den betragsgroessten Wert); der Cache (`verlauf.cache`, Breite `verlauf.breite`) haengt an `id`, `key`, `rotation` und `hovered`. `drawVerlauf` rechnet je Frame nur `toScreen`, duennt auf etwa einen Punkt je 1,5 px aus und zeichnet **eine Polylinie je Abschnitt**, dazu Wandverbinder, Endwerte, min/max (aus allen Stuetzstellen). `drawLaufrichtung` zeichnet Startmarken (Start / Start (Symmetrieachse) / Schnitt / Schnitt (q0 aus Verträglichkeit) / Schnitt (q0 offen)) und Laufrichtungspfeile, auf Boegen nur auf Kanten mit `pfeil` (einer je Bogenstueck).
 - **Grenzen:** Diagrammbreite ist ein fester Pixelwert; die Ausduennung betrifft nur die gezeichneten Punkte, nicht die Rechnung.
 
 ### `drawShearProfileLegacy(gc)` / `drawShearProfile(gc)`
@@ -330,12 +347,17 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 - **Spaltenbreite:** Die Wertespalte (`split`) steht hinter der breitesten Beschriftung (Schrift 8, `getStringWidth`), hoechstens so weit rechts, dass die breitesten Werte noch daneben passen; die lokale Hilfe `schreibe` setzt einzelne Texte, die trotzdem zu breit sind, in Schrift 7 bzw. 6. Volle Zeilen (`voll`) bekommen die ganze Tabellenbreite.
 
 ### `drawSigmaCrossSection(gc, w, h)`
-- **Zweck:** Zweigeteilte Ansicht: eingefaerbter Querschnitt (Zug/Druck-Heatmap, feste 28x22-Rasterung) plus separates Spannungsverlaufs-Diagramm.
-- **Grenzen:** Rasteraufloesung fest (28x22 Zellen), keine adaptive Verfeinerung an Elementraendern.
+- **Zweck:** Zweigeteilte Ansicht: eingefaerbter Querschnitt (Zug/Druck, `qsFarbe.zeichne`) plus separates Spannungsverlaufs-Diagramm.
+- **Hinweis:** Wird derzeit nirgends aufgerufen (die Hauptansicht nutzt `drawSigmaOverlay`).
 
 ### `drawSigmaOverlay(gc, w, h)`
-- **Zweck:** Alternative Vollbild-Overlay-Darstellung der σx-Verteilung direkt ueber der Zeichenflaeche (inkl. neutraler Faser, Hauptachsen, Extremwert-Markierungen), adaptive Rasterung je nach Zoomstufe.
-- **Grenzen:** Rasterzellenzahl an `scale` gekoppelt (12–60 Zellen je Achse); bei sehr grossem Zoom kann die Heatmap grob wirken.
+- **Zweck:** Vollbild-Overlay der σx-Verteilung direkt ueber der Zeichenflaeche (inkl. neutraler Faser, Hauptachsen, Extremwert-Markierungen). Einfaerbung ueber `qsFarbe.zeichne`.
+
+### `qsFarbe` (Spannungseinfaerbung)
+- **Prinzip:** σ ist linear in (u, v), Linien gleicher Spannung sind Parallelen zur Nulllinie. Statt eines Rasters (frueher 12–60 bzw. 28x22 Kacheln, Treppen an schraegen Raendern und sichtbare Farbstufen) werden Baender parallel zur Nulllinie mit dem Umriss jedes Massivelements geschnitten (`qsFarbe.schneide`, Sutherland-Hodgman an zwei Geraden) und als Vieleck gefuellt (`qsFarbe.fuelle`). Raender sind damit exakt, der Verlauf fein.
+- **`qsFarbe.umriss(elem)`:** Rechteck 4 Ecken, Dreieck/Trapez die Punkte, Kreis 96-Eck, Linie/Sektor/Segment ueber `massiv_outline_polygon`.
+- **`qsFarbe.zeichne(gc, stress, farbe, bild, px)`:** Gradient aus `stress` (linear), Bandbreite etwa 3 Pixel quer zur Nulllinie (hoechstens 160 Baender), Bandgrenzen bei Vielfachen der Bandbreite (die Nulllinie ist immer eine Grenze), 0,6 Pixel Ueberlappung gegen Haarlinien. Elemente in Eingabereihenfolge, Loecher weiss (spaetere Elemente liegen oben, wie beim Raster). Ohne Gradient (nur N) eine Farbe je Element.
+- **Test:** `querschnitt.lua` Fall 60 (keine Kacheln, alle Ecken innerhalb der Elemente, Loch weiss, nur N eine Farbe).
 
 ### `drawSigmaExtrema(gc)`
 - **Zweck:** Zeichnet nur die beiden Extrempunkte (`σx,max`/`σx,min`) als farbige Punkte in der normalen Querschnittsansicht.
@@ -371,10 +393,10 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 - **Grenzen:** Der Schwerpunkt, die statischen Momente und `I_T` bleiben geometrisch. Eingaben muessen `A, I_y, I_z > 0` und `I_y I_z - I_yz^2 > 0` erfuellen.
 
 ### `ftm_bezug` (Obermenue Seite 2, Zeile 4 `FTM-Bezug`)
-- **Zweck:** `"schwerpunkt"` (Standard) oder `"kos"`. Steuert die Ergebnisliste (`I_y,S` bzw. `I_y (KOS)` aus `IyS_d` bzw. `IyS_d + A*z_s^2`) und die Einzelwerte-Tabelle (Steiner-Anteile `delta = Element - Bezug`, Gesamtwerte, Ueberschrift). Umschalten ueber `menuPage 9, Zeile 2`.
+- **Zweck:** `"schwerpunkt"` (Standard) oder `"kos"`. Steuert die Ergebnisliste (`I_y,S` bzw. `I_y (KOS)` aus `IyS_d` bzw. `IyS_d + A*z_s^2`) und die Einzelwerte-Tabelle (Steiner-Anteile `delta = Element - Bezug`, Gesamtwerte, Ueberschrift). Umschalten ueber `menuPage 9, Zeile 4`.
 
 ### `loescheAllesQS()` / `on.clearKey()` / `qsLoeschFrage`
-- **Zweck:** `on.clearKey` setzt nur `qsLoeschFrage` und zeichnet die Rueckfrage; `on.enterKey` ruft `loescheAllesQS()` (der bisherige Inhalt von `clearKey`), `on.escapeKey` bricht ab. Bei leerem Querschnitt wird ohne Rueckfrage geloescht. Der Weg `Esc` + `Backspace` (`escape_clear_pending`) laeuft ueber dieselbe Rueckfrage.
+- **Zweck:** `on.clearKey` setzt nur `qsLoeschFrage` und zeichnet die Rueckfrage; `on.enterKey` ruft `loescheAllesQS()` (der bisherige Inhalt von `clearKey`), `on.escapeKey` bricht ab. Bei leerem Querschnitt wird ohne Rueckfrage geloescht. Der Weg `Esc` + `del` (`escape_clear_pending`) laeuft ueber dieselbe Rueckfrage, aber nur, wenn kein Element unter dem Zeiger liegt (sonst loescht `del` dieses, siehe `qsLoeschen.unterZeiger`).
 
 ### `meldung(text, titel, fehler)` / `qsMeldung`
 - **Zweck:** Meldung sichtbar machen: setzt `status` und die globale Box `qsMeldung = { titel, text, fehler, scroll = 0, scrollMax = 0 }`, die `on.paint` ueber `zeichneQsMeldung(gc, w, h)` in der Hauptansicht zeichnet (rot bei `fehler`, sonst gelb, Text umgebrochen). Ist der Text laenger als der Bildschirm, zeichnet `zeichneQsMeldung` nur die Zeilen ab `scroll`, setzt `scrollMax`, zeigt den Zeilenzaehler `a-b/n` und Dreiecke fuer weiteren Text; `on.arrowKey` verschiebt `scroll` mit hoch/runter (vor allen anderen Pfeiltastenfunktionen). `on.escapeKey` schliesst zuerst die Box; `berechneSystem` und die `open...Input`-Funktionen setzen sie zurueck.
@@ -390,7 +412,7 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 - **Grenzen:** `finish_thin_line()` zerlegt einen Linienzug in einzelne 2-Punkt-Elemente (`duenn_elemente`), keine Mehrpunkt-Elemente.
 
 ### `zoomCenter(factor)` / `autoZoom()`
-- **Zweck:** Zoomen um die Bildschirmmitte bzw. automatisches Einpassen aller Elemente in den sichtbaren Bereich.
+- **Zweck:** Zoomen um die Bildschirmmitte bzw. automatisches Einpassen aller Elemente in den sichtbaren Bereich. Mit eingeschalteter Bemassung (`zeigeBemassung ~= 0`) bleiben unten und links 40 Pixel mehr frei fuer die Massketten.
 
 ### `enterMenuInput()`
 - **Zweck:** Verarbeitet eine abgeschlossene Texteingabe im Menuekontext (Raster, Dicke, KOS-Groesse, `ξ`-Profilbeiwert, Element-/Kraft-Koordinaten, Elementdicke).
@@ -413,10 +435,10 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 ### `on.escapeKey()`
 - **Zweck:** Bricht alle offenen Eingaben/Untermenues ab, setzt aber (im Gegensatz zu `on.clearKey()`) keine Geometrie zurueck.
 
-### `on.clearKey()` / `on.backspaceKey()` / `on.deleteKey()`
-- **Zweck:** `on.clearKey()` loescht das gesamte Modell (Geometrie, Kraefte, Ergebnisse) und setzt KOS-Einstellungen wie `plane/rotation` auf Standard zurueck. `on.backspaceKey()` loescht ohne aktive Eingabe das zuletzt erstellte Element bzw. bei doppeltem Escape+Backspace das gesamte Modell. `on.deleteKey()` ist ein Alias fuer `on.backspaceKey()`.
-- **Moeglichkeiten:** Das Loeschen eines Massiv-Elements berechnet die Systemwerte direkt neu.
-- **Grenzen:** Eine automatische Neueinstufung vorhandener Elemente als Loch erfolgt nach dem Loeschen nicht; die Lochkennzeichnung eines Elements wird beim Anlegen bestimmt.
+### `on.clearKey()` / `on.backspaceKey()` / `on.deleteKey()` / `qsLoeschen.unterZeiger()`
+- **Zweck:** `on.clearKey()` loescht das gesamte Modell (Geometrie, Kraefte, Ergebnisse) und setzt KOS-Einstellungen wie `plane/rotation` auf Standard zurueck. `on.backspaceKey()` ist die Taste `del` des Rechners: waehrend der Rueckfrage "alles loeschen" nichts, in einer Eingabe ein Zeichen, bei gesetzten `pending`-Punkten den letzten Punkt, sonst `qsLoeschen.unterZeiger()`. `on.deleteKey()` (Entf der Computersoftware) ist ein Alias fuer `on.backspaceKey()`.
+- **`qsLoeschen.unterZeiger()`** (globale Tabelle `qsLoeschen`): loescht das Hover-Objekt (`hover_type`/`hover_idx`: `"massiv"`, `"duenn"`, `"kraft"`) wie im Tragwerksskript, setzt Hover zurueck, rueckt `selected_idx` nach, verwirft `shear_results` samt Verlauf und Momententabelle und ruft `berechneSystem()`. Ohne Hover: Hinweis, nichts geloescht (bewusst kein Rueckfall auf das zuletzt gezeichnete Element); nach `Esc` (`escape_clear_pending`) stattdessen die Rueckfrage "alles loeschen". Bei offenem Menue, offener Tabelle oder `mode ~= "idle"` nur ein Hinweis. Liegt nach dem Loeschen eines positiven Massivelements ein Loch (Schwerpunkt) in keinem positiven Element mehr, folgt ein Hinweis.
+- **Grenzen:** Eine automatische Neueinstufung vorhandener Elemente als Loch erfolgt nach dem Loeschen nicht; die Lochkennzeichnung eines Elements wird beim Anlegen bestimmt. Frueher kam `escape_clear_pending` vor allen Eingaben; nach einem `Esc` fragte `del` in einem Eingabefeld deshalb nach "alles loeschen", statt ein Zeichen zu loeschen.
 
 ### `on.mouseMove(x, y)` / `on.mouseUp(x, y)`
 - **Zweck:** Hover-Erkennung (Kraefte vor Elementen priorisiert) bzw. Klickverarbeitung fuer Zeichenmodi, Elementauswahl und Kernflaechen-Hover.
@@ -433,5 +455,15 @@ werden nur mehrzellige Profile und die Torsion massiver Querschnitte.
 
 
 - **Mehrzellige geschlossene Duennwandprofile:** nicht unterstuetzt (nur eine Zelle wird ausgewertet).
-- **Unsymmetrische geschlossene Zellen:** Schubfluss-Konstante `q0` nicht exakt bestimmt; Schubmittelpunkt faellt auf Schwerpunkt-Naeherung zurueck.
+- **Unsymmetrische geschlossene Zellen:** `q0` kommt je Lastrichtung aus der Verträglichkeit (`korrigiereVertraeglich`), der Schubmittelpunkt hat immer beide Koordinaten. Der Ergebnisfeld-Zweig „zweite Koordinate statisch unbestimmt“ ist toter Code.
 - **TI-Nspire-Lua-Upvalue-Grenze:** max. 60 lokale Upvalues je Funktion; grosse Funktionen (`enterMenuAction`, `on.paint`) sind nahe am Limit.
+
+### Ergänzungen
+
+- **`qsEingabeZeichen(c)`** (global): Zeichenfilter aller Zahlenfelder in `on.charIn`, inklusive `^` und der Tastensonderzeichen.
+- **`evaluate_input`:** vereinheitlicht e-Notation (`1*10^(6)`), negative Exponenten (`10^(-5)`) und Sonderzeichen vor der Auswertung.
+- **`drawAxes`:** `HA_len = 0.35 * kos_pixel_length`.
+- **`qsHinweis.vTaste()`:** ein Hinweistext für die Taste V je nach Zustand (Schub gerechnet, Verwölbungsansicht offen).
+- **`qsDreh`** (globale Tabelle): `step`, `phi`, `werte`, `oeffnen`, `eingabe`, `zeilen`, `zeichneAchsen`, `zeichneDialog`; eingebunden in `on.charIn` (Taste 8), `on.arrowKey`, `on.enterKey`, `on.escapeKey`, `on.backspaceKey`, `on.paint`, `loescheAllesQS`, `toggleCalculationMenu`.
+- **`berechneSchubmittelpunkt`:** merkt den Ablehnungsgrund in `result.grund`.
+- **`formatKlein`:** ab 10^4 als `m·10^e`.

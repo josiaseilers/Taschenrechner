@@ -1,0 +1,381 @@
+% tragwerk.sty: Stabtragwerke im Zeichenstil des ISD (Institut fuer Statik und Dynamik der Luft- und
+% Raumfahrtkonstruktionen, Uni Stuttgart). Masse aus den TM1-Klausuren SoSe 22 und WiSe 24 gemessen:
+%   Staebe 1,2 pt; gestrichelte Faser 0,6 pt, Muster 3 pt / 3 pt, 2,2 pt neben der Stabachse;
+%   Symbole 0,6 pt; Lasten rot (217,4,41), Einzellasten 0,8 pt, Streckenlasten 0,6 pt;
+%   Bemassung gruen (91,140,90), Linie 0,8 pt, Striche 0,6 pt; Verlaeufe blau (0,81,158) bzw. rot,
+%   Deckkraft 0,25; Pfeilspitze Latex[scale=0.92].
+% Lagersymbole, Eckdreiecke, Kraftpfeile und Lastrahmen wachsen mit symbolgroesse (1 = WiSe 24,
+% 0.77 = SoSe 22), Linienstaerken, Schraffur, Faserabstand, Bemassungsstriche und Schrift nicht.
+% Koordinaten in Metern, der Massstab kommt aus der Option einheit der Umgebung tragwerk.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{tragwerk}[2026/11/05 v0.1 Stabtragwerke im Stil des ISD]
+\RequirePackage{tikz}
+\usetikzlibrary{calc,arrows.meta}
+
+\definecolor{twrot}{RGB}{217,4,41}
+\definecolor{twgruen}{RGB}{91,140,90}
+\definecolor{twblau}{RGB}{0,81,158}
+
+% ---------------------------------------------------------------- Einstellungen
+\def\tw@sg{1}
+\def\tw@gr{}
+\pgfkeys{/tragwerk/.cd,
+  einheit/.code={\def\tw@einheit{#1}}, einheit=1.33cm,
+  symbolgroesse/.code={\def\tw@sg{#1}},
+  % Radius des Vollgelenks in pt (leer: 3,6 pt mal Symbolgroesse wie WiSe 24; SoSe 22: 4.27)
+  gelenkradius/.code={\def\tw@gr{#1}},
+}
+\newcommand\tragwerkset[1]{\pgfkeys{/tragwerk/.cd,#1}}
+% Laenge in pt mal Symbolgroesse (fuer Koordinaten)
+\def\tw@d#1{(#1)*\tw@sg*1pt}
+
+\tikzset{
+  tw/stab/.style={line width=1.2pt},
+  tw/faser/.style={line width=0.6pt, dash pattern=on 3pt off 3pt},
+  tw/symbol/.style={line width=0.6pt, black},
+  tw/pfeil/.style={-{Latex[scale=0.92]}},
+  tw/kraft/.style={twrot, line width=0.8pt, tw/pfeil},
+  tw/last/.style={twrot, line width=0.6pt},
+  tw/lasttext/.style={twrot, inner sep=1pt},
+  tw/mass/.style={twgruen, line width=0.8pt},
+  tw/massstrich/.style={twgruen, line width=0.6pt},
+  tw/masstext/.style={twgruen, font=\footnotesize, fill=white, inner sep=1pt, rounded corners=1.17pt},
+  tw/kos/.style={twgruen, line width=0.8pt, tw/pfeil},
+}
+
+\newenvironment{tragwerk}[1][]{%
+  \tragwerkset{#1}%
+  \begin{tikzpicture}[x=\tw@einheit, y=\tw@einheit, line join=miter]%
+}{\end{tikzpicture}}
+
+% ---------------------------------------------------------------- Geometrie
+% \Knoten{name}{x}{y}
+\newcommand\Knoten[3]{\coordinate (#1) at (#2,#3);}
+
+% Faser: Strecke parallel zu A--B im Abstand 2,2 pt, links (+90 Grad) oder rechts (-90 Grad) der
+% Richtung A->B. anfang/ende verlaengern (positiv) bzw. kuerzen (negativ) die Faser an den Enden,
+% z. B. an Ecken.
+\pgfkeys{/tragwerk/stab/.cd,
+  faser/.store in=\tw@faser, faser=rechts,
+  faser anfang/.store in=\tw@fa, faser anfang=0pt,
+  faser ende/.store in=\tw@fe, faser ende=0pt,
+}
+\newcommand\tw@faserstrecke[2]{%
+  \ifx\tw@faser\tw@keine\else
+    \ifx\tw@faser\tw@links\def\tw@fw{90}\else\def\tw@fw{-90}\fi
+    \coordinate (tw@f1) at ($(#1)!2.2pt!\tw@fw:(#2)$);
+    \coordinate (tw@f2) at ($(#2)!2.2pt!-\tw@fw:(#1)$);
+    \draw[tw/faser] ($(tw@f1)!{-(\tw@fa)}!(tw@f2)$) -- ($(tw@f2)!{-(\tw@fe)}!(tw@f1)$);
+  \fi}
+\def\tw@keine{keine}\def\tw@links{links}
+
+% \Stab[faser=links|rechts|keine, faser anfang=.., faser ende=..]{A}{B}
+\newcommand\Stab[3][]{%
+  \begingroup\pgfkeys{/tragwerk/stab/.cd,#1}%
+  \tw@faserstrecke{#2}{#3}%
+  \draw[tw/stab] (#2) -- (#3);
+  \endgroup}
+
+% \Bogen[faser=..]{A}{B}{R}: Kreisbogen von A nach B mit Radius |R| (Einheiten wie die
+% Koordinaten). R > 0: Bogen links der Richtung A->B gewoelbt, R < 0 rechts.
+\newcommand\Bogen[4][]{%
+  \begingroup\pgfkeys{/tragwerk/stab/.cd,#1}%
+  \path let \p1 = (#2), \p2 = (#3),
+    \n{L} = {veclen(\x2-\x1,\y2-\y1)}, \n{r} = {abs(#4)*\tw@einheit},
+    \n{s} = {ifthenelse(#4>0,1,-1)},
+    \n{d} = {sqrt(max(\n{r}*\n{r}-\n{L}*\n{L}/4,0))},
+    \n{mx} = {(\x1+\x2)/2}, \n{my} = {(\y1+\y2)/2},
+    % Mittelpunkt auf der Gegenseite der Woelbung
+    \n{cx} = {\n{mx} + \n{s}*\n{d}*(\y2-\y1)/\n{L}},
+    \n{cy} = {\n{my} - \n{s}*\n{d}*(\x2-\x1)/\n{L}},
+    \n{a1} = {atan2(\y1-\n{cy},\x1-\n{cx})}, \n{a2} = {atan2(\y2-\n{cy},\x2-\n{cx})},
+    % ueber die Woelbung: R > 0 im Uhrzeigersinn (Mittelpunkt rechts), R < 0 dagegen
+    \n{da} = {ifthenelse(#4>0, -mod(\n{a1}-\n{a2}+720,360), mod(\n{a2}-\n{a1}+720,360))}
+  in \pgfextra{% let-Werte tragen die Einheit pt: als reine Zahlen ablegen
+    \pgfmathsetmacro\tw@x{\n{a1}}\xdef\tw@ba{\tw@x}\pgfmathsetmacro\tw@x{\n{da}}\xdef\tw@bda{\tw@x}%
+    \pgfmathsetmacro\tw@x{\n{r}}\xdef\tw@br{\tw@x}%
+    \pgfmathsetmacro\tw@x{\n{cx}}\xdef\tw@bcx{\tw@x}\pgfmathsetmacro\tw@x{\n{cy}}\xdef\tw@bcy{\tw@x}};
+  \coordinate (tw@bm) at (\tw@bcx pt,\tw@bcy pt);
+  % Faser: links der Richtung A->B liegt beim Bogen mit R > 0 die Aussenseite
+  \ifx\tw@faser\tw@keine\else
+    \ifx\tw@faser\tw@links\def\tw@fr{1}\else\def\tw@fr{-1}\fi
+    \pgfmathsetmacro\tw@rf{\tw@br + 2.2*\tw@fr*ifthenelse(#4>0,1,-1)}
+    \draw[tw/faser] ($(tw@bm)+(\tw@ba:\tw@rf pt)$) arc[start angle=\tw@ba, delta angle=\tw@bda, radius=\tw@rf pt];
+  \fi
+  \draw[tw/stab] (#2) arc[start angle=\tw@ba, delta angle=\tw@bda, radius=\tw@br pt];
+  \endgroup}
+
+% ---------------------------------------------------------------- Gelenke und Ecken
+% \Gelenk{A}: Vollgelenk
+\newcommand\Gelenk[1]{%
+  \ifx\tw@gr\@empty\def\tw@r{\tw@d{3.6}}\else\def\tw@r{\tw@gr pt}\fi
+  \filldraw[tw/symbol, fill=white] (#1) circle[radius={\tw@r}];}
+% \Angelenk[winkel]{A}: Momentengelenk am Stabende, halber Kreis; winkel = Richtung vom Knoten
+% in den angeschlossenen Stab (0 = nach rechts, 90 = nach oben ...)
+\newcommand\Angelenk[2][-90]{%
+  \begin{scope}[shift={(#2)}, rotate=#1]
+    \filldraw[tw/symbol, fill=white] (0,{\tw@d{3.6}}) arc[start angle=90, end angle=-90, radius={\tw@d{3.6}}] -- cycle;
+  \end{scope}}
+% \Ecke{B}{A}{C}: biegesteife Ecke bei B zwischen den Staeben nach A und nach C (schwarzes Dreieck)
+\newcommand\Ecke[3]{\fill ($(#1)!{\tw@d{10.4}}!(#2)$) -- (#1) -- ($(#1)!{\tw@d{10.4}}!(#3)$) -- cycle;}
+% \QGelenk[winkel]{A}: Querkraftgelenk am Stabende (zwei Striche quer zum Stab);
+% \NGelenk[winkel]{A}: Normalkraftgelenk (Huelse laengs zum Stab). winkel wie bei \Angelenk.
+\newcommand\QGelenk[2][0]{%
+  \begin{scope}[shift={(#2)}, rotate=#1, tw/symbol]
+    \fill[white] ({\tw@d{1.5}},{\tw@d{-5}}) rectangle ({\tw@d{6}},{\tw@d{5}});
+    \draw ({\tw@d{2}},{\tw@d{-4.5}}) -- ({\tw@d{2}},{\tw@d{4.5}});
+    \draw ({\tw@d{5.5}},{\tw@d{-4.5}}) -- ({\tw@d{5.5}},{\tw@d{4.5}});
+  \end{scope}}
+\newcommand\NGelenk[2][0]{%
+  \begin{scope}[shift={(#2)}, rotate=#1, tw/symbol]
+    \fill[white] ({\tw@d{1}},{\tw@d{-4}}) rectangle ({\tw@d{11}},{\tw@d{4}});
+    \draw ({\tw@d{1.5}},{\tw@d{3.5}}) -- ({\tw@d{10.5}},{\tw@d{3.5}});
+    \draw ({\tw@d{1.5}},{\tw@d{-3.5}}) -- ({\tw@d{10.5}},{\tw@d{-3.5}});
+    \draw ({\tw@d{1.5}},{\tw@d{-3.5}}) -- ({\tw@d{1.5}},{\tw@d{3.5}});
+  \end{scope}}
+
+% ---------------------------------------------------------------- Lager
+% Schraffur unter einer Bodenlinie von x0 bis x1 (pt) auf Hoehe y (pt), im lokalen System des Lagers:
+% Striche 2,65 pt / 3,16 pt schraeg nach unten links, Abstand 3,1 pt, vom rechten Ende aus
+\newcommand\tw@boden[3]{%
+  \draw[tw/symbol] ({(#1)*1pt},{(#3)*1pt}) -- ({(#2)*1pt},{(#3)*1pt});
+  \pgfmathtruncatemacro\tw@n{floor(((#2)-(#1)-2.95)/3.1)}%
+  \foreach \tw@i in {0,...,\tw@n}{%
+    \draw[tw/symbol] ({((#2)-0.6-3.1*\tw@i)*1pt},{(#3)*1pt}) -- ++(-2.65pt,-3.16pt);}%
+}
+% Lager im lokalen System: Knoten im Ursprung, Lager darunter. winkel dreht das Lager um den Knoten
+% (0 = unten, 90 = rechts, 180 = oben, 270 = links). Option halb: halber Gelenkkreis (Stab laeuft durch)
+\pgfkeys{/tragwerk/lager/.cd, halb/.code={\def\tw@halb{1}}}
+\def\tw@lagergelenk{%
+  \ifx\tw@halb\tw@eins
+    \filldraw[tw/symbol, fill=white] ({\tw@d{-3.9}},0) arc[start angle=180, end angle=360, radius={\tw@d{3.9}}] -- cycle;
+  \else
+    \filldraw[tw/symbol, fill=white] (0,0) circle[radius={\tw@d{3.9}}];
+  \fi}
+\def\tw@eins{1}
+\newcommand\tw@dreieck{%
+  \filldraw[tw/symbol, fill=white] (0,0) -- ({\tw@d{8.40}},{\tw@d{-14.55}}) -- ({\tw@d{-8.40}},{\tw@d{-14.55}}) -- cycle;}
+% \Festlager[winkel][optionen]{A}
+\newcommand\Festlager[2][0]{\tw@lager{#1}{#2}{fest}}
+\newcommand\Loslager[2][0]{\tw@lager{#1}{#2}{los}}
+\newcommand\Einspannung[2][0]{\tw@lager{#1}{#2}{ein}}
+\newcommand\Fuehrung[2][0]{\tw@lager{#1}{#2}{fuehrung}}
+\newcommand\tw@lager[3]{%
+  \begingroup\def\tw@halb{0}%
+  \def\tw@w{#1}\tw@lagerwinkel#1,,\relax
+  \begin{scope}[shift={(#2)}, rotate=\tw@w]
+    \csname tw@lager@#3\endcsname
+  \end{scope}\endgroup}
+% winkel darf "90,halb" sein
+\def\tw@lagerwinkel#1,#2,#3\relax{\def\tw@w{#1}\def\tw@opt{#2}\ifx\tw@opt\tw@halbwort\def\tw@halb{1}\fi}
+\def\tw@halbwort{halb}
+\def\tw@lager@fest{%
+  \tw@dreieck
+  \pgfmathsetmacro\tw@a{8.1*\tw@sg}\pgfmathsetmacro\tw@h{-14.55*\tw@sg}%
+  \tw@boden{-\tw@a}{\tw@a}{\tw@h}%
+  \tw@lagergelenk}
+\def\tw@lager@los{%
+  \tw@dreieck
+  \pgfmathsetmacro\tw@a{8.1*\tw@sg}\pgfmathsetmacro\tw@h{-17.92*\tw@sg}%
+  \tw@boden{-\tw@a}{\tw@a}{\tw@h}%
+  \tw@lagergelenk}
+\def\tw@lager@ein{%
+  \pgfmathsetmacro\tw@a{10.86*\tw@sg}%
+  \tw@boden{-\tw@a}{\tw@a}{0}}
+% Parallelfuehrung (Schiebehuelse, wie TM1 SoSe 22 Aufgabe 1g): Wand mit Schraffur knapp hinter dem
+% Stabende, zwei Fuehrungslinien beiderseits des Stabes. Der Stab kommt von oben (winkel 0) und kann
+% nur laengs der Fuehrung gleiten, also senkrecht zur Wand; Verdrehung und Querverschiebung sind gehalten.
+\def\tw@lager@fuehrung{%
+  \pgfmathsetmacro\tw@a{10.86*\tw@sg}\pgfmathsetmacro\tw@g{4.2*\tw@sg}%
+  \pgfmathsetmacro\tw@w{-4*\tw@sg}\pgfmathsetmacro\tw@o{12.8*\tw@sg}%
+  \tw@boden{-\tw@a}{\tw@a}{\tw@w}%
+  \draw[tw/symbol] ({-\tw@g pt},{\tw@w pt}) -- ({-\tw@g pt},{\tw@o pt});
+  \draw[tw/symbol] ({\tw@g pt},{\tw@w pt}) -- ({\tw@g pt},{\tw@o pt});}
+% \Feder[winkel]{A}: Wegfeder; \Drehfeder[winkel]{A}
+\newcommand\Feder[2][0]{%
+  \begin{scope}[shift={(#2)}, rotate=#1]
+    \pgfmathsetmacro\tw@z{3*\tw@sg}\pgfmathsetmacro\tw@u{2.5*\tw@sg}%
+    \draw[tw/symbol] (0,0) -- (0,{-\tw@u pt})
+      \foreach \tw@i in {1,...,6}{ -- ({ifthenelse(mod(\tw@i,2)==1,1,-1)*\tw@z pt},{-(\tw@u+2.5*\tw@sg*\tw@i)*1pt}) }
+      -- (0,{-(\tw@u+2.5*\tw@sg*7)*1pt}) -- (0,{-(2*\tw@u+2.5*\tw@sg*7)*1pt});
+    \pgfmathsetmacro\tw@a{8.1*\tw@sg}\pgfmathsetmacro\tw@h{-(2*\tw@u+2.5*\tw@sg*7)}%
+    \tw@boden{-\tw@a}{\tw@a}{\tw@h}%
+  \end{scope}}
+\newcommand\Drehfeder[2][0]{%
+  \begin{scope}[shift={(#2)}, rotate=#1]
+    \draw[tw/symbol] (0,0) \foreach \tw@i in {0,10,...,540}{ -- ({\tw@i+90}:{\tw@d{1+0.012*\tw@i}}) };
+    \pgfmathsetmacro\tw@a{8.1*\tw@sg}\pgfmathsetmacro\tw@h{-11*\tw@sg}%
+    \draw[tw/symbol] ({\tw@d{7.5}},0) -- ({\tw@d{7.5}},{\tw@h pt});
+    \tw@boden{-\tw@a}{\tw@a}{\tw@h}%
+  \end{scope}}
+
+% ---------------------------------------------------------------- Beschriftungen
+% \Lagername[winkel][abstand]{A}{Text}: Buchstabe im Kreis neben einem Knoten
+\newcommand\Lagername[3][-30]{%
+  \node[draw, line width=0.4pt, circle, minimum size=17.3pt, inner sep=0pt]
+    at ($(#2)+(#1:22pt)$) {#3};}
+% \Beschriftung[optionen]{Punkt}{Text}: freier Text (z. B. Stabnummern)
+\newcommand\Beschriftung[3][]{\node[inner sep=1pt,#1] at (#2) {#3};}
+% \Stabnummer[seite]{A}{B}{n}: Nummer in Stabmitte, 9 pt neben dem Stab (links bzw. rechts von A->B)
+\newcommand\Stabnummer[4][links]{%
+  \def\tw@s{#1}\ifx\tw@s\tw@links\def\tw@fw{90}\else\def\tw@fw{-90}\fi
+  \coordinate (tw@m) at ($(#2)!0.5!(#3)$);
+  \node[inner sep=1pt] at ($(tw@m)!9pt!\tw@fw:(#3)$) {#4};}
+
+% ---------------------------------------------------------------- Lasten
+% \Kraft[optionen]{A}{winkel}{Text}: Einzellast in Richtung winkel (0 = nach rechts, -90 = nach
+% unten). Standard: Spitze am Punkt (drueckend), Option ziehend: Anfang am Punkt.
+\pgfkeys{/tragwerk/kraft/.cd,
+  ziehend/.code={\def\tw@zieh{1}},
+  abstand/.store in=\tw@kab, abstand=0pt,
+  laenge/.store in=\tw@kl, laenge=35.3,
+  text/.store in=\tw@kt, text=above,
+}
+\newcommand\Kraft[4][]{%
+  \begingroup\def\tw@zieh{0}\pgfkeys{/tragwerk/kraft/.cd,#1}%
+  \pgfmathsetmacro\tw@L{\tw@kl*\tw@sg}%
+  \pgfmathsetmacro\tw@w{#3}\pgfmathsetmacro\tw@g{\tw@w+180}%
+  % Text 7 pt hinter dem freien Ende (wie in den Klausuren)
+  \ifx\tw@zieh\tw@eins
+    \draw[tw/kraft] ($(#2)+(\tw@w:\tw@kab)$) -- ++(\tw@w:\tw@L pt);
+    \node[tw/lasttext, anchor=\tw@g] at ($(#2)+(\tw@w:\tw@kab)+(\tw@w:\tw@L pt)+(\tw@w:7pt)$) {#4};
+  \else
+    \draw[tw/kraft] ($(#2)+(\tw@g:\tw@kab)+(\tw@g:\tw@L pt)$) -- ($(#2)+(\tw@g:\tw@kab)$);
+    \node[tw/lasttext, anchor=\tw@w] at ($(#2)+(\tw@g:\tw@kab)+(\tw@g:\tw@L pt)+(\tw@g:3pt)$) {#4};
+  \fi
+  \endgroup}
+% \Moment[optionen]{A}{Text}: Einzelmoment, Bogen mit Radius 15 pt ueber 240 Grad; luecke = Richtung
+% der Luecke (Standard unten), uhrzeigersinn = Drehsinn
+\pgfkeys{/tragwerk/moment/.cd,
+  uhrzeigersinn/.code={\def\tw@uz{1}},
+  luecke/.store in=\tw@lu, luecke=-90,
+  % kleines Kreuz am Angriffspunkt (Moment mitten auf einem Stab)
+  punkt/.code={\def\tw@mp{1}},
+}
+\newcommand\Moment[3][]{%
+  \begingroup\def\tw@uz{0}\def\tw@mp{0}\pgfkeys{/tragwerk/moment/.cd,#1}%
+  \ifx\tw@mp\tw@eins
+    \draw[twrot, line width=0.6pt] ($(#2)+(-1.6pt,-1.6pt)$) -- ++(3.2pt,3.2pt)
+      ($(#2)+(-1.6pt,1.6pt)$) -- ++(3.2pt,-3.2pt);
+  \fi
+  \ifx\tw@uz\tw@eins
+    \draw[tw/kraft] ($(#2)+(\tw@lu+300:15pt)$) arc[start angle={\tw@lu+300}, delta angle=-240, radius=15pt];
+  \else
+    \draw[tw/kraft] ($(#2)+(\tw@lu+60:15pt)$) arc[start angle={\tw@lu+60}, delta angle=240, radius=15pt];
+  \fi
+  \pgfmathsetmacro\tw@g{\tw@lu+180}%
+  \node[tw/lasttext, anchor=\tw@lu] at ($(#2)+(\tw@g:17pt)$) {#3};
+  \endgroup}
+
+% \Streckenlast[optionen]{A}{B}{qA}{qB}{Text}: Last quer zum Stab A--B. qA, qB: Groesse an den Enden
+% (Zahlen, nur das Verhaeltnis zaehlt). Rahmen auf der Seite seite (links/rechts von A->B), Pfeile
+% zum Stab hin, Option ziehend: vom Stab weg. richtung = Winkel der Pfeile fuer globale Lasten
+% (z. B. -90 = senkrecht nach unten), dann Rahmen mit Seiten in Lastrichtung.
+\pgfkeys{/tragwerk/last/.cd,
+  seite/.store in=\tw@ls, seite=links,
+  ziehend/.code={\def\tw@lz{1}},
+  richtung/.store in=\tw@lr, richtung=,
+  hoehe/.store in=\tw@lh, hoehe=29.6,
+  abstand/.store in=\tw@lab, abstand=6.5,
+  pfeilabstand/.store in=\tw@lpa, pfeilabstand=15.4,
+  % Text: Richtung der Hinweislinie (Winkel) und Ende des Rahmens (anfang = bei A, ende = bei B)
+  text/.store in=\tw@ltp, text=,
+  text an/.store in=\tw@lta, text an=,
+  % Rahmen an den Enden kuerzen (pt, laengs des Stabes), z. B. vor Lagern oder Ecken
+  kuerzen anfang/.store in=\tw@lka, kuerzen anfang=0,
+  kuerzen ende/.store in=\tw@lke, kuerzen ende=0,
+}
+\def\tw@ende{ende}
+\newcommand\Streckenlast[6][]{%
+  \begingroup\def\tw@lz{0}\pgfkeys{/tragwerk/last/.cd,#1}%
+  \ifx\tw@ls\tw@links\def\tw@fw{90}\else\def\tw@fw{-90}\fi
+  % Grundlinie des Rahmens: parallel zum Stab im Abstand abstand, an den Enden ggf. gekuerzt
+  \pgfmathsetmacro\tw@ab{\tw@lab*\tw@sg}\pgfmathsetmacro\tw@H{\tw@lh*\tw@sg}%
+  \coordinate (tw@a0) at ($(#2)!\tw@ab pt!\tw@fw:(#3)$);
+  \coordinate (tw@b0) at ($(#3)!\tw@ab pt!-\tw@fw:(#2)$);
+  \coordinate (tw@a) at ($(tw@a0)!\tw@lka pt!(tw@b0)$);
+  \coordinate (tw@b) at ($(tw@b0)!\tw@lke pt!(tw@a0)$);
+  % Richtung der Rahmenseiten: quer zum Stab (lokal) oder gegen die Lastrichtung (global)
+  \ifx\tw@lr\@empty
+    \path let \p1 = ($(tw@a)-(#2)$) in \pgfextra{\pgfmathsetmacro\tw@phi{atan2(\y1,\x1)}\xdef\tw@phig{\tw@phi}};
+  \else
+    \pgfmathsetmacro\tw@phi{\tw@lr+180}\xdef\tw@phig{\tw@phi}%
+  \fi
+  \pgfmathsetmacro\tw@m{max(abs(#4),abs(#5))}%
+  \pgfmathsetmacro\tw@hA{\tw@H*abs(#4)/\tw@m}\pgfmathsetmacro\tw@hB{\tw@H*abs(#5)/\tw@m}%
+  \coordinate (tw@at) at ($(tw@a)+(\tw@phig:\tw@hA pt)$);
+  \coordinate (tw@bt) at ($(tw@b)+(\tw@phig:\tw@hB pt)$);
+  \draw[tw/last] (tw@a) -- (tw@b) -- (tw@bt) -- (tw@at) -- cycle;
+  % Pfeile: gleich verteilt (i + 1/2)/n, Spitze 1,24 pt vor der Grundlinie. Der Abstand zaehlt quer
+  % zur Pfeilrichtung (senkrechte Last auf schraegem Stab: waagerechter Abstand)
+  \path let \p1 = ($(tw@b)-(tw@a)$) in \pgfextra{%
+    \pgfmathsetmacro\tw@q{abs(\x1*sin(\tw@phig)-\y1*cos(\tw@phig))}%
+    \pgfmathtruncatemacro\tw@n{max(2,round(\tw@q/(\tw@lpa*\tw@sg)))}\xdef\tw@ng{\tw@n}};
+  \foreach \tw@i in {1,...,\tw@ng}{%
+    \pgfmathsetmacro\tw@t{(\tw@i-0.5)/\tw@ng}%
+    \pgfmathsetmacro\tw@hi{\tw@hA+(\tw@hB-\tw@hA)*\tw@t}%
+    \ifdim\tw@hi pt>5pt
+      \ifx\tw@lz\tw@eins
+        \draw[tw/last, tw/pfeil] ($(tw@a)!\tw@t!(tw@b)+(\tw@phig:1.24pt)$) -- ++(\tw@phig:{\tw@hi pt-1.24pt});
+      \else
+        \draw[tw/last, tw/pfeil] ($(tw@a)!\tw@t!(tw@b)+(\tw@phig:\tw@hi pt)$) -- ($(tw@a)!\tw@t!(tw@b)+(\tw@phig:1.24pt)$);
+      \fi
+    \fi}
+  % Text am oberen Ende mit kurzer Hinweislinie
+  \ifx\tw@ltp\@empty\let\tw@ltp\tw@phig\fi
+  \pgfmathsetmacro\tw@g{\tw@ltp+180}%
+  % ohne Angabe am groesseren Ende (Dreieckslast), bei gleich grossen Werten am Anfang
+  \ifx\tw@lta\@empty
+    \ifdim\tw@hB pt>\tw@hA pt\def\tw@lta{ende}\else\def\tw@lta{anfang}\fi
+  \fi
+  \ifx\tw@lta\tw@ende\def\tw@tp{tw@bt}\else\def\tw@tp{tw@at}\fi
+  \draw[twrot, line width=0.2pt] (\tw@tp) -- ++(\tw@ltp:13pt) node[tw/lasttext, anchor=\tw@g] {#6};
+  \endgroup}
+
+% \Laengslast[optionen]{A}{B}{Text}: kurze Pfeile laengs des Stabes, 5 pt daneben (seite), in
+% Richtung A->B (Option gegen: B->A)
+\pgfkeys{/tragwerk/laengs/.cd, seite/.store in=\tw@ns, seite=rechts, gegen/.code={\def\tw@ngeg{1}}}
+\newcommand\Laengslast[4][]{%
+  \begingroup\def\tw@ngeg{0}\pgfkeys{/tragwerk/laengs/.cd,#1}%
+  \ifx\tw@ns\tw@links\def\tw@fw{90}\else\def\tw@fw{-90}\fi
+  \pgfmathsetmacro\tw@o{5*\tw@sg}\pgfmathsetmacro\tw@pl{9.7*\tw@sg}\pgfmathsetmacro\tw@pa{15.9*\tw@sg}%
+  \coordinate (tw@a) at ($(#2)!\tw@o pt!\tw@fw:(#3)$);
+  \coordinate (tw@b) at ($(#3)!\tw@o pt!-\tw@fw:(#2)$);
+  \path let \p1 = ($(tw@b)-(tw@a)$) in \pgfextra{\pgfmathtruncatemacro\tw@n{max(1,floor(veclen(\x1,\y1)/(\tw@pa pt)))}\xdef\tw@nn{\tw@n}\pgfmathsetmacro\tw@len{veclen(\x1,\y1)}\xdef\tw@lg{\tw@len}};
+  \foreach \tw@i in {1,...,\tw@nn}{%
+    \pgfmathsetmacro\tw@t{(\tw@i-0.5)/\tw@nn}%
+    \pgfmathsetmacro\tw@dt{0.5*\tw@pl/\tw@lg}%
+    \pgfmathsetmacro\tw@ta{\tw@t-\tw@dt}\pgfmathsetmacro\tw@tb{\tw@t+\tw@dt}%
+    \ifx\tw@ngeg\tw@eins
+      \draw[tw/last, tw/pfeil] ($(tw@a)!\tw@tb!(tw@b)$) -- ($(tw@a)!\tw@ta!(tw@b)$);
+    \else
+      \draw[tw/last, tw/pfeil] ($(tw@a)!\tw@ta!(tw@b)$) -- ($(tw@a)!\tw@tb!(tw@b)$);
+    \fi}
+  \coordinate (tw@m) at ($(tw@a)!0.5!(tw@b)$);
+  \node[tw/lasttext] at ($(tw@m)!8pt!\tw@fw:(tw@b)$) {#4};
+  \endgroup}
+
+% ---------------------------------------------------------------- Bemassung
+% Endstriche: quer 8,53 pt, schraeg 6,6 pt unter 59 Grad zur Masslinie
+\newcommand\tw@massende[2]{% Punkt, Winkel der Masslinie
+  \draw[tw/massstrich] ($(#1)+(#2+90:4.27pt)$) -- ($(#1)+(#2-90:4.27pt)$);
+  \draw[tw/massstrich] ($(#1)+(#2+59:3.3pt)$) -- ($(#1)+(#2+239:3.3pt)$);}
+% \Mass{P}{Q}{Text}: Masslinie von P nach Q
+\newcommand\Mass[3]{%
+  \path let \p1 = ($(#2)-(#1)$) in \pgfextra{\pgfmathsetmacro\tw@mw{atan2(\y1,\x1)}\xdef\tw@mwg{\tw@mw}};
+  \draw[tw/mass] (#1) -- (#2) node[midway, tw/masstext] {#3};
+  \tw@massende{#1}{\tw@mwg}\tw@massende{#2}{\tw@mwg}}
+% \MassH{A}{B}{y}{Text}: waagerechtes Mass zwischen den x-Werten von A und B auf Hoehe y
+% \MassV{A}{B}{x}{Text}: senkrechtes Mass zwischen den y-Werten (von oben nach unten gezeichnet)
+\newcommand\MassH[4]{\Mass{#1 |- 0,#3}{#2 |- 0,#3}{#4}}
+\newcommand\MassV[4]{%
+  \path let \p1 = (#1), \p2 = (#2) in \pgfextra{\pgfmathsetmacro\tw@o{\y1>\y2}\xdef\tw@og{\tw@o}};
+  \ifdim\tw@og pt>0.5pt\Mass{#3,0 |- #1}{#3,0 |- #2}{#4}\else\Mass{#3,0 |- #2}{#3,0 |- #1}{#4}\fi}
+% \Einheit{Punkt}{Text}: z. B. [m] in Gruen
+\newcommand\Einheit[2]{\node[twgruen] at (#1) {#2};}
+% \KOS{Punkt}: Koordinatensystem x nach rechts, y nach oben
+\newcommand\KOS[1]{%
+  \draw[tw/kos] (#1) -- ++(26.9pt,0) node[anchor=north west, inner sep=1pt] {$x$};
+  \draw[tw/kos] (#1) -- ++(0,26.9pt) node[anchor=north east, inner sep=2pt] {$y$};
+  \fill[twgruen] (#1) circle[radius=1.42pt];}
+\endinput

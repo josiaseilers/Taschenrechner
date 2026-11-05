@@ -1,0 +1,119 @@
+\babel@toc {ngerman}{}\relax 
+\contentsline {section}{\numberline {1}Grundlegendes}{6}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Überblick}{6}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Grundprinzip der Bedienung}{7}{subsection.1.2}%
+\contentsline {subsubsection}{\numberline {1.2.1}Koordinatensysteme}{7}{subsubsection.1.2.1}%
+\contentsline {subsubsection}{\numberline {1.2.2}Tragwerk- und Querschnittmodul}{8}{subsubsection.1.2.2}%
+\contentsline {part}{I\hspace {1em}Tragwerksskript}{8}{part.1}%
+\contentsline {section}{\numberline {2}Systemeingabe}{8}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Knoten}{8}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Stäbe}{10}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Fachwerke}{12}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Systeme speichern und öffnen}{13}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Berechnung, Ansichten und Diagramme}{13}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Schnittkräfte}{15}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Explosionszeichnung}{16}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Prinzip der virtuellen Verrückung (PvV)}{17}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Kraftgrößenverfahren (KGV)}{18}{subsection.3.4}%
+\contentsline {section}{\numberline {4}Steifigkeiten, Temperatur und Symbole}{18}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Steifigkeiten und starre Stäbe}{18}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Temperatur}{19}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Symbolischer Modus}{20}{subsection.4.3}%
+\contentsline {section}{\numberline {5}Export ins CAS}{21}{section.5}%
+\contentsline {subsection}{\numberline {5.1}LGS-Matrix: Gleichgewichtsbedingungen TM1}{23}{subsection.5.1}%
+\contentsline {subsubsection}{\numberline {5.1.1}Lösungsweg \texttt {lgs\_weg}}{24}{subsubsection.5.1.1}%
+\contentsline {subsection}{\numberline {5.2}Arbeitssatz: \texttt {w\_eq1}, \texttt {pvv\_kin}, \texttt {pvv\_pol}, \texttt {w\_eq2}}{26}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Linien aus der WGV/FEM-Lösung: \texttt {v\_EI\_stab}, \texttt {u\_EA\_stab}}{28}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Rand-LGS: \texttt {wneu}, \texttt {uneu}, \texttt {wv}, \texttt {uv}, \texttt {randbed}}{28}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}Nach einer gesuchten Größe auflösen}{30}{subsection.5.5}%
+\contentsline {subsection}{\numberline {5.6}Knotenverschiebungen: \texttt {ux\_k}, \texttt {uy\_k}, \texttt {phi\_k}}{31}{subsection.5.6}%
+\contentsline {section}{\numberline {6}Meldungen im Tragwerksskript}{32}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Warnungen (rot bzw.\ orange)}{32}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Hinweise (gelb)}{32}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Export- und Rand-LGS-Meldungen}{33}{subsection.6.3}%
+\contentsline {section}{\numberline {7}Was das Tragwerksskript nicht kann}{34}{section.7}%
+\contentsline {section}{\numberline {8}Wie gerechnet wird}{34}{section.8}%
+\contentsline {section}{\numberline {9}Vorzeichen im Vergleich zu den Formelsammlungen (WGV und FEM)}{34}{section.9}%
+\contentsline {part}{II\hspace {1em}Querschnittsskript}{36}{part.2}%
+\contentsline {section}{\numberline {10}Querschnittseingabe}{36}{section.10}%
+\contentsline {section}{\numberline {11}Elemente zeichnen}{37}{section.11}%
+\contentsline {section}{\numberline {12}Koordinatensystem, Einheiten, Optionen}{38}{section.12}%
+\contentsline {section}{\numberline {13}Querschnittswerte}{39}{section.13}%
+\contentsline {section}{\numberline {14}Normalspannung $\sigma _x$}{40}{section.14}%
+\contentsline {section}{\numberline {15}Schubspannung und Schubmittelpunkt}{41}{section.15}%
+\contentsline {subsection}{\numberline {15.1}Geschlossene Zellen: warum die Symmetrie so wichtig ist}{42}{subsection.15.1}%
+\contentsline {subsection}{\numberline {15.2}Ohne Symmetrieachse: die Verträglichkeit}{42}{subsection.15.2}%
+\contentsline {section}{\numberline {16}Torsion}{43}{section.16}%
+\contentsline {section}{\numberline {17}Verwölbung}{44}{section.17}%
+\contentsline {section}{\numberline {18}Kernfläche}{44}{section.18}%
+\contentsline {section}{\numberline {19}Ergebnisfeld und Tabellen im Überblick}{45}{section.19}%
+\contentsline {subsection}{\numberline {19.1}Ergebnisfeld (\textsf {\textbf {e}})}{45}{subsection.19.1}%
+\contentsline {subsection}{\numberline {19.2}Einzelwerte-Tabelle (\textsf {\textbf {t}})}{46}{subsection.19.2}%
+\contentsline {subsection}{\numberline {19.3}$\sigma _x$-Tabelle (\textsf {\textbf {t}} nach der $\sigma _x$-Berechnung)}{46}{subsection.19.3}%
+\contentsline {subsection}{\numberline {19.4}Momententabelle des Schubmittelpunkts}{47}{subsection.19.4}%
+\contentsline {section}{\numberline {20}Meldungen im Querschnittsskript}{47}{section.20}%
+\contentsline {section}{\numberline {21}Was das Querschnittsskript nicht kann}{49}{section.21}%
+\contentsline {section}{\numberline {22}Wie gerechnet wird}{49}{section.22}%
+\contentsline {part}{III\hspace {1em}Spannungskreis}{49}{part.3}%
+\contentsline {section}{\numberline {23}Die Idee: Eingabe über Schnitte}{49}{section.23}%
+\contentsline {section}{\numberline {24}Bedienung}{50}{section.24}%
+\contentsline {section}{\numberline {25}Die beiden Bilder}{50}{section.25}%
+\contentsline {subsection}{\numberline {25.1}Spannungsscheibe}{50}{subsection.25.1}%
+\contentsline {subsection}{\numberline {25.2}Mohrscher Spannungskreis}{51}{subsection.25.2}%
+\contentsline {section}{\numberline {26}Wann ist der Zustand bestimmt?}{51}{section.26}%
+\contentsline {section}{\numberline {27}Grenzen und Tricks}{52}{section.27}%
+\contentsline {part}{IV\hspace {1em}Die Mathematik hinter den Features}{52}{part.4}%
+\contentsline {section}{\numberline {28}Das Weggrößenverfahren im Programm}{53}{section.28}%
+\contentsline {subsection}{\numberline {28.1}Festeinspannkräfte beliebiger Lasten}{54}{subsection.28.1}%
+\contentsline {subsection}{\numberline {28.2}Gelenke und die Knotenverdrehung}{58}{subsection.28.2}%
+\contentsline {section}{\numberline {29}Bögen: Teilstäbe und Schnittgrößen über den Winkel}{58}{section.29}%
+\contentsline {subsection}{\numberline {29.1}Geometrie und Teilstäbe}{58}{subsection.29.1}%
+\contentsline {subsection}{\numberline {29.2}Schnittgrößen über den Winkel}{59}{subsection.29.2}%
+\contentsline {section}{\numberline {30}Starre Stäbe: Zwangsbedingungen und Nullraum}{60}{section.30}%
+\contentsline {section}{\numberline {31}Das Rand-LGS: die Biegelinie wie von Hand}{66}{section.31}%
+\contentsline {subsection}{\numberline {31.1}Ansatz je Stab}{66}{subsection.31.1}%
+\contentsline {subsection}{\numberline {31.2}Bedingungen an den Knoten}{67}{subsection.31.2}%
+\contentsline {subsection}{\numberline {31.3}Lösen: erst wie von Hand, dann das CAS}{67}{subsection.31.3}%
+\contentsline {subsection}{\numberline {31.4}Starre Stäbe im Rand-LGS: direkt oder Grenzwert}{68}{subsection.31.4}%
+\contentsline {subsection}{\numberline {31.5}Knotenverschiebungen aus den Randwerten}{69}{subsection.31.5}%
+\contentsline {section}{\numberline {32}Symbolischer Modus: rechnen mit Platzhaltern}{69}{section.32}%
+\contentsline {section}{\numberline {33}Kraftgrößenverfahren: Hauptsystem und $\delta $-Zahlen}{70}{section.33}%
+\contentsline {section}{\numberline {34}Polplan, Verschiebungszustand und Arbeitssatz}{71}{section.34}%
+\contentsline {subsection}{\numberline {34.1}Scheiben finden}{71}{subsection.34.1}%
+\contentsline {subsection}{\numberline {34.2}Pole und Polstrahlen}{71}{subsection.34.2}%
+\contentsline {subsection}{\numberline {34.3}Der Verschiebungszustand}{72}{subsection.34.3}%
+\contentsline {subsection}{\numberline {34.4}Der Arbeitssatz}{72}{subsection.34.4}%
+\contentsline {section}{\numberline {35}Gleichgewicht der Teilsysteme (LGS-Matrix)}{74}{section.35}%
+\contentsline {section}{\numberline {36}Querschnittswerte}{77}{section.36}%
+\contentsline {section}{\numberline {37}Normalspannung und neutrale Faser}{78}{section.37}%
+\contentsline {section}{\numberline {38}Schubfluss in dünnwandigen Profilen}{78}{section.38}%
+\contentsline {subsection}{\numberline {38.1}Offene Profile}{78}{subsection.38.1}%
+\contentsline {subsection}{\numberline {38.2}Eine geschlossene Zelle: woher kommt $q_0$?}{79}{subsection.38.2}%
+\contentsline {subsection}{\numberline {38.3}Schubmittelpunkt}{80}{subsection.38.3}%
+\contentsline {subsection}{\numberline {38.4}Massive Querschnitte}{80}{subsection.38.4}%
+\contentsline {section}{\numberline {39}Torsion und Verwölbung}{81}{section.39}%
+\contentsline {section}{\numberline {40}Kernfläche}{82}{section.40}%
+\contentsline {section}{\numberline {41}Spannungskreis: vom Schnitt zum Zustand}{83}{section.41}%
+\contentsline {part}{V\hspace {1em}Beispiele}{83}{part.5}%
+\contentsline {section}{\numberline {42}TM1}{84}{section.42}%
+\contentsline {subsection}{\numberline {42.1}WiSe~21/22}{84}{subsection.42.1}%
+\contentsline {subsubsection}{\numberline {42.1.1}Geschlossenes System (Nr.~2)}{84}{subsubsection.42.1.1}%
+\contentsline {subsubsection}{\numberline {42.1.2}Qualitavtive Verläufe im symbolischen Modus (Nr.~4)}{86}{subsubsection.42.1.2}%
+\contentsline {subsubsection}{\numberline {42.1.3}PvV (Nr.~3)}{86}{subsubsection.42.1.3}%
+\contentsline {subsubsection}{\numberline {42.1.4}Schnittkräfte Bögen (Nr.~5)}{90}{subsubsection.42.1.4}%
+\contentsline {subsubsection}{\numberline {42.1.5}Fachwerk (Nr.6)}{90}{subsubsection.42.1.5}%
+\contentsline {section}{\numberline {43}TM2}{92}{section.43}%
+\contentsline {subsection}{\numberline {43.1}Biegelinie (TM2 WiSe~21/22, Nr.~7)}{92}{subsection.43.1}%
+\contentsline {subsection}{\numberline {43.2}Verschiebungsaufgaben (TM2 WiSe~20/21 Nr.~4)}{93}{subsection.43.2}%
+\contentsline {subsection}{\numberline {43.3}Pendelstabannahme (TM2 WiSe 22/23 Nr.~4)}{95}{subsection.43.3}%
+\contentsline {subsection}{\numberline {43.4}Schiefe Biegung (TM2 WiSe 25/26 Nr.~8)}{96}{subsection.43.4}%
+\contentsline {subsection}{\numberline {43.5}Schiefe Biegung/Kernfläche (TM2 WiSe21/22 Nr.~8)}{97}{subsection.43.5}%
+\contentsline {subsection}{\numberline {43.6}MSK (TM2 WiSe 21/22 Nr.~3)}{99}{subsection.43.6}%
+\contentsline {subsection}{\numberline {43.7}Schubspannung und SMP (TM2 SoSe 24 Nr.~8)}{99}{subsection.43.7}%
+\contentsline {subsection}{\numberline {43.8}Verwölbung (TM2 SoSe 20 Nr.~9)}{104}{subsection.43.8}%
+\contentsline {section}{\numberline {44}Statik}{104}{section.44}%
+\contentsline {part}{VI\hspace {1em}Anhang}{104}{part.6}%
+\contentsline {section}{\numberline {A}Tastenkürzel Tragwerksskript}{104}{appendix.A}%
+\contentsline {section}{\numberline {B}Tastenkürzel Querschnittsskript}{105}{appendix.B}%
+\contentsline {section}{\numberline {C}Tastenkürzel Spannungskreis}{105}{appendix.C}%
+\contentsline {section}{\numberline {D}Häufige Stolpersteine}{105}{appendix.D}%

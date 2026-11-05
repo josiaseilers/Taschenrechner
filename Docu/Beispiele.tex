@@ -50,7 +50,10 @@ Nach dem Berechnen könnt ihr das LGS, das zur Explosionsansicht (Abb.~\ref{fig:
 gehört, über die zweite Seite des Obermenüs (\emph{LGS-Matrix}) in den Taschenrechner exportieren
 (Abb.~\ref{fig:WiSe2122nr2_3}). Die Gleichungen stehen dann lesbar in \code{lgs}, die Lösung
 bekommt ihr zum Beispiel mit \code{ggw\_x = ggw\_a$^{-1}$*ggw\_b}
-(Abschnitt~\ref{sec:lgs-matrix}).
+(Abschnitt~\ref{sec:lgs-matrix}). Es bietet sich in einer Klausur jedoch an die eingebaute Lösung
+von \code{lgs\_weg} abzuschreiben, dann kann man sich bei Fehlern trotzdem noch Teilpunkte erhoffen.
+Alternativ lässt sich das LGS mit Lösungsweg auch über die Taste \taste{l} im Programm selber Anzeigen
+(Abschnitt~\ref{sec:lgs-weg}) (Abb. \ref{fig:WiSe2122nr2_3}).
 
 \begin{figure}[htbp]
     \centering
@@ -79,21 +82,34 @@ bekommt ihr zum Beispiel mit \code{ggw\_x = ggw\_a$^{-1}$*ggw\_b}
     \hfill
     \begin{subfigure}[t]{0.48\textwidth}
         \centering
-        \includegraphics[width=\linewidth]{./fig/TM1/WiSe2122mr2_4.png}
+        \includegraphics[width=\linewidth]{./fig/TM1/WiSe2122nr2_4.png}
         \caption{Lösung mit \code{ggw\_x}}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM1/WiSe2122nr2_7.png}
+        \caption{Lösungsweg im Taschenrechner \code{lgs\_weg}}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM1/WiSe2122nr2_8.png}
+        \caption{Lösungsweg im Programm (Taste \taste{l})}
     \end{subfigure}
     \caption{WiSe~21/22, Nr.~2: exportiertes LGS}
     \label{fig:WiSe2122nr2_3}
 \end{figure}
 
 Die Explosionsansicht kann manchmal etwas unübersichtlich sein. Wenn ihr nah genug heranzoomt,
-sollte aber trotzdem alles erkennbar sein. Die Ergebnisse müsst ihr natürlich nicht in dieser
-Vektorform aufschreiben, nur ihr Inhalt zählt.
+sollte aber trotzdem alles erkennbar sein. Es ist zwar nicht zwingend notwendig beide Seiten abzuzeichnen,
+es muss der korrigierenden Person aber nicht nur deutlich werden wie groß die Auflager- und Gelenkkräfte sind,
+sondern auch in welche Richtung sie zeigen.
 
 An dieser Stelle will ich anmerken, dass meist nur bei Systemen mit einem geschlossenen Ring wie
 diesem nach allen Gelenk- und Auflagerkräften gefragt wird. Bei offenen Systemen ohne Ring wird oft
 nur nach den Auflagerkräften gefragt. Das exportierte LGS liefert dann zwar auch die richtige Lösung, ist aber
-meist mehr, als ihr braucht. Den Punkt, um den das Programm die Momentensumme eines Teilsystems
+meist mehr, als ihr braucht. Hier hilft \code{lgs\_weg}: Oft stehen die Lagerkräfte dort schon in
+den ersten Zeilen, z.\,B.\ aus dem Gleichgewicht am Gesamtsystem. Den Punkt, um den das Programm die Momentensumme eines Teilsystems
 bildet, seht ihr, wenn ihr in der Explosionsansicht mit der Maus über das Teilsystem fahrt
 (\emph{Hover}).
 
@@ -102,7 +118,7 @@ Die Zustandslinien, also die Verläufe der Schnittgrößen, zeichnet euch das Pr
 erkennt, fahrt mit der Maus über den jeweiligen Stab, dann zeigt das Programm nur noch diesen Stab
 mit seinen Randwerten an.
 
-\subsubsection{Qualitavtive Verläufe im symbolischen Modus (Nr.~4)}
+\subsubsection{Qualitavtive Verläufe im symbolischen Modus (Nr.~4)}\label{ex:symbolisch}
 
 Um meinen den oben genannten Punkt zum symbolischen Modus zu verdeutlichen will ich hier kurz auf Teilaufgabe b) eingehen.
 Das System und der Querkraftverlauf sind in Abbildung~\ref{fig:TM1WiSe2122Nr4} dargestellt.
@@ -124,17 +140,26 @@ Das System und der Querkraftverlauf sind in Abbildung~\ref{fig:TM1WiSe2122Nr4} d
     \label{fig:TM1WiSe2122Nr4}
 \end{figure}
 
-Im Querkraft verlauf sieht es so aus, als ob diese an den Auflagern null wird. Wenn man sich die Beschriftung der Randwerte 
+Im Querkraft verlauf sieht es so aus, als ob diese an den Auflagern null wird. Wenn man sich die Beschriftung der Randwerte
 anschaut wird jedoch klar, dass ist nur der Fall, wenn $q\cdot l=F$ bzw. $q\cdot a=F$ gilt. Das ist eben genau die Annhame des Programms,
 um überhaupt irgendeinen Verlauf zeichnen zu können.
 Die Aufgabe gibt aber unten vor: $F>q\cdot a$. Damit wird die Qerkraft am linekn Ende negativ und am rechten Ende positiv.
 Die Verläufe von symbolische Berechnungen solltet ihr also \textbf{nie} einfach blind abzeichnen.
 
-\subsection{PvV (Nr.~3)}
+\subsubsection{PvV (Nr.~3)}\label{ex:pvv}
 
-Zum PvV gibt es eigentlich nicht viel zu sagen. System zeichnen, \taste{v} drücken, Bindung wählen, abzeichnen,
-dann exportieren und aufschreiben. 
+Gesucht sind die Lagerkräfte $A_H$ und $B_V$ des Systems in Abb.~\ref{fig:TM1WiSe2122Nr3_1}, beide
+mit dem Prinzip der virtuellen Verrückung. Die Stütze steht bei $x = 0$ und ist 6 hoch. Ihr
+Fußpunkt (Knoten~1) ist frei, dort zieht die Last 4 nach links (eingegeben als x-Last \code{-4}).
+In Höhe 3 sitzt das Festlager $A$ (Knoten~2), in Höhe 4{,}5 greift das Moment 3 im Uhrzeigersinn
+an. Oben läuft der Riegel 6 nach rechts, bei $x = 3$ drückt die Last 2 nach unten (Knoten~4). Am
+rechten Ende sitzt ein Gelenk, von dort führt ein schräger Stab hinunter zum Festlager $B$ bei
+$(4|3)$. Alle Koordinaten hier mit $x$ nach rechts und der Höhe nach oben, gemessen ab dem
+Fußpunkt.
 
+Das System besteht aus zwei Scheiben: Scheibe~1 ist die Stütze mit dem Riegel (biegesteif
+verbunden), Scheibe~2 der schräge Stab. Verbunden sind sie über das Gelenk bei $(6|6)$, das ist
+der Nebenpol (1,2).
 
 \begin{figure}[htbp]
     \centering
@@ -142,6 +167,38 @@ dann exportieren und aufschreiben.
     \caption{TM1 WiSe~21/22, Nr.~3 im Programm}
     \label{fig:TM1WiSe2122Nr3_1}
 \end{figure}
+
+Der Ablauf im Programm ist immer derselbe:
+
+\begin{enumerate}
+  \item System eingeben und mit \taste{b} rechnen.
+  \item \taste{v} drücken. Ist das System starr, fragt das Programm \emph{System ist starr! [Enter]
+        für PvV-Modus}, \taste{Enter}.
+  \item Die Bindung wählen, die zur gesuchten Größe gehört: Zeiger auf den Knoten bzw.\ Stab,
+        \taste{Enter}, Zeile wählen (für $A_H$ \emph{Lager X} am Knoten von $A$, für $B_V$
+        \emph{Lager Y} am Knoten von $B$).
+  \item Polplan (\taste{p}) und Verschiebungsfigur (\taste{v}) abzeichnen bzw.\ mit eurem vergleichen.
+  \item Im Obermenü Seite~2 \emph{Arbeitssatz} exportieren und \code{w\_eq2} nach der gesuchten
+        Größe auflösen. Die freigesetzte Lagerkraft heißt im Export $H$ bzw.\ $V$, der Rechner
+        schreibt sie klein, also \code{solve(w\_eq2,h)}.
+\end{enumerate}
+
+\textbf{Vorzeichen.} $H$ zählt im Programm nach rechts, $V$ nach unten (Abschnitt~\ref{sec:arbeitssatz}).
+Jeder Weg ist positiv in Richtung seiner Kraft, \code{$\delta$\_k1x} also nach rechts (in
+Richtung der x-Last, auch wenn die selbst negativ ist), \code{$\delta$\_k4y} nach unten. Winkel und
+Momente zählen gegen den Uhrzeigersinn. Dreht eine Scheibe um ihren Pol mit $\varphi$ gegen den
+Uhrzeigersinn, wandert ein Punkt, der um $h$ über dem Pol liegt, um $h\,\varphi$ nach links, und ein
+Punkt, der um $a$ rechts vom Pol liegt, um $a\,\varphi$ nach oben. Mehr als diese beiden Hebel
+braucht ihr für die ganze Aufgabe nicht.
+
+\paragraph*{Lagerkraft \texorpdfstring{$A_H$}{A\_H}}
+
+\textbf{Polplan} (Abb.~\ref{fig:TM1WiSe2122Nr3_2}). Löst ihr in $A$ die waagerechte Bindung, kann
+sich $A$ nur noch waagerecht bewegen, der Hauptpol HP1 liegt also auf der Senkrechten durch $A$
+($x = 0$). Scheibe~2 hängt am Festlager $B$, also ist HP2 $= B = (4|3)$. HP1 liegt außerdem auf der
+Geraden durch HP2 und den Nebenpol (1,2) bei $(6|6)$. Die steigt um $3/2$ je Einheit nach rechts
+und erreicht $x = 0$ in der Höhe $3 - 4 \cdot \tfrac32 = -3$. HP1 liegt also bei $(0|-3)$, 3 unter
+dem Fußpunkt. Bezugsscheibe ist hier Scheibe~2, ihr Winkel heißt in \code{w\_eq2} $\varphi_0$.
 
 \begin{figure}[htbp]
     \centering
@@ -160,6 +217,66 @@ dann exportieren und aufschreiben.
     \label{fig:TM1WiSe2122Nr3_2}
 \end{figure}
 
+\textbf{\code{w\_eq1}} schreibt nur die Arbeit hin, jede Kraft mal ihren Weg:
+\[
+  H\,\delta_H - 4\,\delta_{k1x} + 2\,\delta_{k4y} - 3\,\varphi_1 = 0 .
+\]
+Die $-4$ ist die eingegebene x-Last, die $2$ die y-Last nach unten. Das Moment greift an der
+Stütze an, also an Scheibe~1, und arbeitet an deren Drehwinkel $\varphi_1$. Im Uhrzeigersinn
+heißt es $-3$.
+
+\textbf{\code{pvv\_kin}} sagt, wie groß jeder Weg ist (Abb.~\ref{fig:TM1WiSe2122Nr3_4}, links):
+
+\begin{center}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Weg} & \textbf{über die eigene Scheibe} & \textbf{über $\varphi_0$} \\
+    \midrule
+    $\delta_{k1x}$ & $-3\,\varphi_1$ & $-\varphi_0$ \\
+    $\delta_{k4y}$ & $-3\,\varphi_1$ & $-\varphi_0$ \\
+    $\delta_H$ & $-6\,\varphi_1$ & $-2\,\varphi_0$ \\
+    $\varphi_1$ & $\varphi_1$ & $\tfrac13\,\varphi_0$ \\
+    $\varphi_2$ & $\varphi_2$ & $\varphi_0$ \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+Alle drei Punkte gehören zu Scheibe~1 und drehen um HP1 $= (0|-3)$. Der Fußpunkt liegt 3 über
+HP1, er wandert also um $3\,\varphi_1$ nach links: $\delta_{k1x} = -3\,\varphi_1$. Lager $A$
+liegt 6 über HP1: $\delta_H = -6\,\varphi_1$. Knoten~4 liegt 3 rechts von HP1, er wandert um
+$3\,\varphi_1$ nach oben, und weil $\delta_{k4y}$ nach unten zählt, steht dort $-3\,\varphi_1$
+(seine waagerechte Bewegung leistet mit der senkrechten Last keine Arbeit). Die beiden unteren
+Zeilen sind die Verhältnisse der Drehwinkel, und die kommen aus \code{pvv\_pol}.
+
+\textbf{\code{pvv\_pol}} schreibt die Bewegung des Nebenpols (1,2) einmal über jede Scheibe hin:
+\[
+  \delta x_{P12} = -9\,\varphi_1 = -3\,\varphi_2 .
+\]
+Über Scheibe~1 liegt das Gelenk 9 über HP1, über Scheibe~2 liegt es 3 über HP2. Beide Wege sind
+gleich, weil das Gelenk auf beiden Scheiben derselbe Punkt ist. Daraus folgt
+$\varphi_2 = 3\,\varphi_1$, also $\varphi_1 = \varphi_0/3$. Das ist genau die Rechnung, die ihr
+im Polplan von Hand macht.
+
+\textbf{\code{w\_eq2}} ist \code{w\_eq1} mit Spalte~3 eingesetzt:
+\[
+  -2\,H\,\varphi_0 + 4\,\varphi_0 - 2\,\varphi_0 - \varphi_0
+  = \varphi_0\,(1 - 2\,H) = 0
+  \quad\Rightarrow\quad H = 0{,}5 .
+\]
+Weil die virtuelle Verdrehung $\varphi_0$ beliebig ist, muss die Klammer null sein. $A_H = 0{,}5$
+zeigt also nach rechts. Der Rechner zeigt \code{w\_eq2} als \code{$\varphi$\_0-2$\cdot$h$\cdot\varphi$\_0=0}
+und \code{solve(w\_eq2,h)} liefert \code{h=0.5 or $\varphi$\_0=0}. Die zweite Lösung ist die
+triviale ohne Bewegung, sie sagt nichts aus.
+
+\paragraph*{Lagerkraft \texorpdfstring{$B_V$}{B\_V}}
+
+\textbf{Polplan} (Abb.~\ref{fig:TM1WiSe2122Nr3_3}). Jetzt bleibt $A$ ein Festlager, HP1 $= A =
+(0|3)$. In $B$ ist die senkrechte Bindung gelöst, $B$ kann sich nur noch senkrecht bewegen, HP2
+liegt also auf der Waagerechten durch $B$ (Höhe 3). Außerdem liegt HP2 auf der Geraden durch HP1
+und den Nebenpol (1,2) bei $(6|6)$, und die schneidet die Höhe 3 genau in $A$. Beide Hauptpole
+fallen also zusammen. Zwei Scheiben, die um denselben Punkt drehen und in einem Gelenk
+zusammenhängen, drehen gleich: $\varphi_1 = \varphi_2$. Bezugsscheibe ist Scheibe~1.
+
 \begin{figure}[htbp]
     \centering
     \begin{subfigure}[t]{0.48\textwidth}
@@ -177,10 +294,43 @@ dann exportieren und aufschreiben.
     \label{fig:TM1WiSe2122Nr3_3}
 \end{figure}
 
-Die Zeilen der Matrizen \code{pvv\_kin} und \code{pvv\_pol} (Abb.~\ref{fig:TM1WiSe2122Nr3_4})
-sind als Gleichungskette zu lesen. Hier gilt also z.B. $\delta_{k1x}= -3\cdot\varphi_1=-\varphi_0$, oder 
-$\delta x_{p12}= -9\cdot\varphi_1=-3\varphi_2$. Mit diesen Gleichungen lässt sich aus \code{w\_eq1} \code{w\_eq2} bauen.
-Diese gleichung lässt sich dann entweder von hand oder mit dem Taschenrechner nach der gesuchten Größe auflösen.
+\textbf{\code{w\_eq1}} ist dieselbe wie oben, nur mit $V\,\delta_V$ statt $H\,\delta_H$:
+\[
+  V\,\delta_V - 4\,\delta_{k1x} + 2\,\delta_{k4y} - 3\,\varphi_1 = 0 .
+\]
+
+\textbf{\code{pvv\_kin}} (Abb.~\ref{fig:TM1WiSe2122Nr3_4}, rechts), alle Hebel jetzt ab $A = (0|3)$:
+
+\begin{center}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Weg} & \textbf{über die eigene Scheibe} & \textbf{über $\varphi_0$} \\
+    \midrule
+    $\delta_{k1x}$ & $3\,\varphi_1$ & $3\,\varphi_0$ \\
+    $\delta_{k4y}$ & $-3\,\varphi_1$ & $-3\,\varphi_0$ \\
+    $\delta_V$ & $-4\,\varphi_2$ & $-4\,\varphi_0$ \\
+    $\varphi_1$ & $\varphi_1$ & $\varphi_0$ \\
+    $\varphi_2$ & $\varphi_2$ & $\varphi_0$ \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+Der Fußpunkt liegt jetzt 3 \emph{unter} dem Pol und wandert deshalb nach rechts:
+$\delta_{k1x} = +3\,\varphi_1$. Knoten~4 liegt 3 rechts von $A$ und wandert um $3\,\varphi_1$ nach
+oben. $B$ gehört zu Scheibe~2, liegt 4 rechts von HP2 und wandert um $4\,\varphi_2$ nach oben, gegen
+die Richtung von $V$: $\delta_V = -4\,\varphi_2$.
+
+\textbf{\code{pvv\_pol}}: $\delta y_{P12} = -6\,\varphi_1 = -6\,\varphi_2$. Das Gelenk liegt über beide
+Scheiben 6 rechts vom gemeinsamen Pol, daraus folgt wieder $\varphi_1 = \varphi_2$.
+
+\textbf{\code{w\_eq2}}:
+\[
+  -4\,V\,\varphi_0 - 12\,\varphi_0 - 6\,\varphi_0 - 3\,\varphi_0
+  = -\varphi_0\,(4\,V + 21) = 0
+  \quad\Rightarrow\quad V = -5{,}25 .
+\]
+$V$ zählt nach unten, $B_V = 5{,}25$ zeigt also nach oben. Auf dem Rechner:
+\code{solve(w\_eq2,v)} liefert \code{v=-5.25 or $\varphi$\_0=0}.
 
 \begin{figure}[htbp]
     \centering
@@ -199,9 +349,27 @@ Diese gleichung lässt sich dann entweder von hand oder mit dem Taschenrechner n
     \label{fig:TM1WiSe2122Nr3_4}
 \end{figure}
 
-\subsection{Schnittkräfte Bögen (Nr.~5)}
+\paragraph*{Auf dem Rechner nachvollziehen}
 
-Mit dem Programm lassen sich die Funktionen für Schnittkraftverläufe von normalen Stäben als auch von Bögen 
+\begin{itemize}
+  \item \code{pvv\_kin} und \code{pvv\_pol} anzeigen lassen und mit eurem Polplan vergleichen. Ein
+        einzelnes Element holt ihr mit \code{pvv\_kin[3,3]}.
+  \item Selbst einsetzen, für $A_H$ z.\,B.\ (auf dem Rechner in einer Zeile):
+        \begin{center}
+          \code{w\_eq1|$\delta$\_k1x=pvv\_kin[1,3] and $\delta$\_k4y=pvv\_kin[2,3]}\\
+          \code{and $\delta$\_h=pvv\_kin[3,3] and $\varphi$\_1=pvv\_kin[4,3]}
+        \end{center}
+        Das liefert dasselbe wie \code{w\_eq2}.
+  \item \code{pvvinfo} erklärt jeden Namen, falls ihr nicht mehr wisst, welcher Weg welcher ist.
+  \item Habt ihr das System vorher mit \taste{b} gerechnet, vergleicht das Programm die
+        freigesetzte Größe beim Export mit der FEM. Hier stimmen beide ($A_H = 0{,}5$,
+        $B_V = 5{,}25$ nach oben), die Export-Meldung bleibt also ohne Warnung
+        (Abschnitt~\ref{sec:arbeitssatz}).
+\end{itemize}
+
+\subsubsection{Schnittkräfte Bögen (Nr.~5)}
+
+Mit dem Programm lassen sich die Funktionen für Schnittkraftverläufe von normalen Stäben als auch von Bögen
 ausgeben. Bei bögen ist die Laufvraibale nur nicht mehr die Länge entlang des Stabes sondern der Winkel.
 also für diese Aufgabe zweilmal $\varphi \in [0,\frac{\pi}{4}]$ bzw. $\varphi \in [0,90\text{°}]$. Hier ist die Winkel-Einstellung
 des Taschenrechenrs wichtig.\\
@@ -215,13 +383,26 @@ es sucht eine schöne Darstellung der Anfangswerte und kombiniert diese dann zur
     \label{fig:TM1WiSe2122Nr5_1}
 \end{figure}
 
+Nach dem Berechnen mit Taste \taste{b} können im Obermenue (Seite~2) die Funktionen der Schnittkraftverläufe ausgegeben werden.
+Das ergibt die in Abbildung~\ref{fig:TM1WiSe2122Nr5_2} dargestellten Funktionen. Weil das Programm für jeden Stab bzw. Bogen
+wieder eine neue Laufvariable ansetzt, müssen für diese Aufgabe die Verläufe des zweiten Bogensegments um $45$° bzw um
+$\frac{\pi}{4}$ verschoben werden (je nachdem wie der Taschenrechner eingestellt ist).
 
-\subsection{Fachwerk (Nr.6)}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\linewidth]{./fig/TM1/WiSe2122nr5_2.png}
+    \caption{Analytische Schnittkraftverläfufe von TM1 WiSe~21/22 Nr.~5}
+    \label{fig:TM1WiSe2122Nr5_2}
+\end{figure}
+
+
+\subsubsection{Fachwerk (Nr.6)}
 
 Vom Prinzip werden Fachwerke genau gleich eingegeben wie normale Systeme, nur das hier die orientierung der gestrichelten Faser
-keine Rolle spielt. Es ist jedoch sinnvoll den Fachwerk Modus anzumachen, dann wird die statische Bestimmtheit beim hovern über $n=$ 
-auch die Formel für Fachwerke verwendet und alle Knoten werden zu vollgelenken gemacht, auch wenn der Modus erst nach dem 
-zeichnen des Systems angemacht wird.  
+keine Rolle spielt. Es ist jedoch sinnvoll den Fachwerk Modus anzumachen, dann wird die statische Bestimmtheit beim hovern über $n=$
+auch die Formel für Fachwerke verwendet und alle Knoten werden zu vollgelenken gemacht, auch wenn der Modus erst nach dem
+zeichnen des Systems angemacht wird.
 
 
 \begin{figure}[htbp]
@@ -232,8 +413,8 @@ zeichnen des Systems angemacht wird.
 \end{figure}
 
 Die Stabe in Abb.~\ref{fig:TM1WiSe2122Nr6_1} die ein grünes Kreuz haben sind die ohne Rechnung erkennbaren Nullstäbe
-Falls nach der Berechnung stäbkkräfte mit einer grünen Null beschriftet werdsen, aber dort kein Kreuz ist, ist das zwar ein 
-Nullstab der aber nicht direkt aus den Regeln erkennbar ist. Für Afgaben bei denen nach Nullstäben gefragt wird, also nur 
+Falls nach der Berechnung stäbkkräfte mit einer grünen Null beschriftet werdsen, aber dort kein Kreuz ist, ist das zwar ein
+Nullstab der aber nicht direkt aus den Regeln erkennbar ist. Für Afgaben bei denen nach Nullstäben gefragt wird, also nur
 die durchgekreuzten Stäbe angeben
 
 \begin{figure}[htbp]
@@ -246,7 +427,7 @@ die durchgekreuzten Stäbe angeben
 Für die Verwendung der beiden Seiten des E-Modus muss darauf geachtet werden, dass entweder die Stäbe in der
 gleichen Reihenfolge wie in der Aufgabe gezeichnet werden oder die Bennenung hinterher angepasst wird. Macht ihr das nicht
 ist z.B. Stab 13 aus eurer Rechnung nicht Stab 13 aus der Aufgabe\\
-Gleiches gilt natürlich auch für die Verwendung des LGS-Exports. Hier wird (Falls der Fachwerk Modus an ist) 
+Gleiches gilt natürlich auch für die Verwendung des LGS-Exports. Hier wird (Falls der Fachwerk Modus an ist)
 das Knotenschnittverfahren verwendet. Die Benennung im LGS ist die gleiche wie auf der zweiten Seite des E-Modus.
 
 
@@ -321,7 +502,7 @@ Aufgaben wie diese lassen sich mit der richtigen Eingabe auch direkt im Programm
 Programm aussieht ist in Abb.~\ref{fig:verschiebungSystem} dargestellt. Hierbei muss natürlich auf die Einheiten geachtet werden.
 In der Aufgabe sind die relevanten Dehnsteifigkeiten nicht direkt gegeben, genauso wie manche Angaben nicht in der
 für das Programm geforderten Einheit sind.\\
-Für Kräfte immer kN, genauso wie für die Dehnsteifigkeit $EA$ und die Biegesteifigkeit $EI$ in kNm.  
+Für Kräfte immer kN, genauso wie für die Dehnsteifigkeit $EA$ und die Biegesteifigkeit $EI$ in kNm.
 
 \begin{figure}[htbp]
     \centering
@@ -333,7 +514,7 @@ Für Kräfte immer kN, genauso wie für die Dehnsteifigkeit $EA$ und die Biegest
 In den \emph{neuen} Exportfunktionen wird die Temperatur auch symbolisch miteinberechnet.
 Um also ann die Verschiebung des rechten unteren Knoten zu kommen lässt sich das entweder über die obere
 Knotenexportfunktion machen, über die Biegelinie des rechten horizontalen Stabes oder über die Längsverschiebungsfunktion
-des rechten vertikalen Stabes. Über den CAS Befehl \code{solve()} lässt sich die Temperatur direkt ausrechnen 
+des rechten vertikalen Stabes. Über den CAS Befehl \code{solve()} lässt sich die Temperatur direkt ausrechnen
 (vgl. Abb.~\ref{fig:verschiebungErgebniss}). Ich habe hier die Tempertur $dt$ genant (nur $T$ ist wie bereits erwähnt nicht erlaubt),
 die Variable nach der aufgelöst werden soll muss der \code{solve()} Funktion als zweites Argument mit gegeben werden.
 
@@ -401,7 +582,7 @@ Bei einer Handrechnung wird diese Annahme quasi automatisch getroffen, das Progr
 Um diese Aufgabe mit dem Programm also korrekt zu rechnen müsseb bei den beiden vertikalen stäbe jeweils Angelenke eingebaut werden.
 Falls man das nicht macht wirft das Programm eine Warnung bzw. einen Hinweis.
 
-Bei dieser Aufgabe lassen sich die Ergebnisse entweder aus der Ansicht zur Normalkraft 
+Bei dieser Aufgabe lassen sich die Ergebnisse entweder aus der Ansicht zur Normalkraft
 oder aus dem E-Modus holen (Abb.~\ref{fig:TM2WiSe2223Nr4}).
 
 \begin{figure}[htbp]
@@ -421,10 +602,10 @@ oder aus dem E-Modus holen (Abb.~\ref{fig:TM2WiSe2223Nr4}).
     \label{fig:TM2WiSe2223Nr4}
 \end{figure}
 
-\textbf{Wichtig} ist, dass das Programm, für symbolische Federn in den Verläufen in seltenen Fällen nicht die richtigen 
+\textbf{Wichtig} ist, dass das Programm, für symbolische Federn in den Verläufen in seltenen Fällen nicht die richtigen
 Werte ausgibt (Bei symbolischen Temperaturen sowieso nicht).
-Zur Sicherheit würde ich deswegen die Schnittgrößen über die \emph{neuen} Verschiebungsfunktionen ermitteln. 
-Das dauert zwar gerade für große Systeme länger, ist aber zuverlässiger weil dort wirklich alles symbolisch gerechnet wird 
+Zur Sicherheit würde ich deswegen die Schnittgrößen über die \emph{neuen} Verschiebungsfunktionen ermitteln.
+Das dauert zwar gerade für große Systeme länger, ist aber zuverlässiger weil dort wirklich alles symbolisch gerechnet wird
 und eben nicht gepfuscht wird.
 
 
@@ -432,7 +613,7 @@ und eben nicht gepfuscht wird.
 \subsection{Schiefe Biegung (TM2 WiSe 25/26 Nr.~8)}
 
 In dieser Aufgbabe sind die Dicken der dünnwandigen Elemente nicht gegeben, da diese abber sowohl für das
-FTM als auch für die Lange des Schwerpunkts wichtig sind, müssen diese Werte manuell mit den Werten aus der 
+FTM als auch für die Lange des Schwerpunkts wichtig sind, müssen diese Werte manuell mit den Werten aus der
 Aufgabenstellung überschrieben werden. Das geht im Obermenue (Taste \taste{o}) auf Seite 3.\\
 Für das Zeichnen so eines schiefen Querschnitts empfielt sich ein Rastermaß von z.B. $\frac{1}{\sqrt{2}}$.
 
@@ -444,7 +625,7 @@ Für das Zeichnen so eines schiefen Querschnitts empfielt sich ein Rastermaß vo
 \end{figure}
 
 Bei dieser Aufgabe braucht man die $\sigma_x$-Berechnung. Um die Normalkraft hier richtig einzuberechnen
-muss die Resultierende der Streckenlast über die halbe Länge berechnet werden, also: 
+muss die Resultierende der Streckenlast über die halbe Länge berechnet werden, also:
 $R=0,1~\frac{\text{kN}}{cm}\cdot100~\text{cm}$.
 Für die Kraft muss also $F_y=-500~\text{N}$, $F_z=300~\text{N}$ und $F_x=10000~\text{N}$ eingegeben werden.
 
@@ -475,11 +656,77 @@ Die Ergebnisse sind in Abbildung \ref{fig:TM2WiSe2526Nr8_2} dargestellt.
 \end{figure}
 
 Ich will anmereken, dass des öfteren bei Aufgaben Querschnittswerte gegeben sind, die nicht zur Bemaßung in der Zeichnung passen,
-ob das absichtlich so ist konnte mir leider keiner sagen. Es ist also immer sinnvoll das einmal gegen zu prüfen und die Werte evtl. zu überschreiben.
+ob das absichtlich so ist konnte mir leider keiner sagen. Es ist also immer sinnvoll das einmal gegen zu prüfen und die Werte evtl. zu überschreiben.\\
 Was die ISD-Musterlösung bei dieser Aufgabe gerechnet hat, ist mir nicht ganz klar. Meines Verständnisses nach wurde hier mit einem
 Schwerpunkt für die Momente aus Normalkraft gerechnet, der genau in der Mitte des U profiels liegt, sodass die Normalkraft um die $y$-Achse kein Moment erzeugt.
 
-\subsection{Schiefe Biegung/Kernfäche (TM2 WiSe21/22 Nr.~8)}
+\subsection{Schiefe Biegung/Kernfläche (TM2 WiSe21/22 Nr.~8)}
+
+Diese Aufgabe lässt sich mit einem Trick komplett im Programm rechnen (Abb. \ref{fig:TM2WiSe2122Nr8_1}).
+Das Problem stellt hier die über den Kragarm verteilte Streckenlast dar. Um dennoch die Schnittgrößen in
+Feldmitte korrekt zu berechnen muss diese also durch eine Einzellast mit gleicher Wirkung ersetzt werden.\\
+Dazu muss die Teilresultierende mit ihrem Hebelarm verrechnet werden. Die Teilresultierende ergibt sich zu:
+$R=100~\text{cm}\cdot0.1~\frac{\text{kN}}{\text{cm}}=10~\text{kN}$. Diese greift aber nicht am Ende an sondern
+im KOS der Aufgabe bei $x=150~\text{cm}$, hat also einen Hebelarm von $50~\text{cm}$.
+Der Hebelarm der im Programm über $\Delta x$ eingegeben wird, ist aber durch die Aufgabe zu $100~\text{cm}$
+bestimmt, also muss diese Teilresultierende für die korrekte Wirkung noch durch $2$ geteilt werden.
+Damit muss $F_z=5000~\text{N}$ eingegeben werden. Für $\sigma_x$ ist das richtig, denn dort zählt nur
+das Moment. Die Querkraft $Q_z$ ist damit aber nur halb so groß wie in Wirklichkeit. Für
+Schubspannungen dürft ihr den Trick also nicht verwenden.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{./fig/TM2/WiSe2122nr8_1.png}
+    \caption{TM2 WiSe~21/22, Nr.~8 im Programm}
+    \label{fig:TM2WiSe2122Nr8_1}
+\end{figure}
+
+Aus der Tabelle (Abb. \ref{fig:TM2WiSe2122Nr8_2}) können nun die Ergebnisse für Teilaufgabe a), b) und c) abgelesen werden.
+Zwei Dinge sehen dabei zunächst nach Abweichungen von der Musterlösung aus, sind aber keine. Erstens
+gibt das Programm $\sigma_x$ in MPa aus, die Musterlösung rechnet in kN/cm$^2$, und
+$1~\text{kN/cm}^2 = 10~\text{MPa}$. Aus $-147{,}9\,z - 14{,}29\,y$ wird so $-14{,}79\,z - 1{,}43\,y$.
+Zweitens rundet die Musterlösung den Schwerpunkt auf $2{,}3$~cm über der Unterkante, exakt sind es
+$62/27 = 2{,}2963$~cm. Deshalb weichen $\sigma_{max}$, $\sigma_{min}$ und die Kernpunkte um etwa
+$0{,}1\,\%$ ab. Gebt ihr den Schwerpunkt wie $I_y = 33{,}8~\text{cm}^4$ manuell vor (Optionsmenü
+Seite~3), kommen genau die Werte der Musterlösung heraus.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/WiSe2122nr8_2.png}
+        \caption{$\sigma_x$-Tabelle 1/2}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/WiSe2122nr8_3.png}
+        \caption{$\sigma_x$-Tabelle 2/2}
+    \end{subfigure}
+    \caption{TM2 WiSe~21/22, Nr.~8 $\sigma_x$-Tabelle}
+    \label{fig:TM2WiSe2122Nr8_2}
+\end{figure}
+
+Für Teilaufgabe d) kann der Kernflächen Modus entweder über Taste \taste{k} oder über das Berechnungsmenü auf Taste \taste{b}
+aufgerufen werden. Die zwei Bilder sind in Abbildung \ref{fig:TM2WiSe2122Nr8_3} dargestellt. Wenn die umhüllenden Geraden
+oder die Eckpunkte der Kernfläche \emph{gehovert} werden, werden deren Achsenschnittpunkte bzw. deren Koordinaten angezeigt.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.3\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/WiSe2122nr8_4.png}
+        \caption{Umhüllende Geraden}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/WiSe2122nr8_5.png}
+        \caption{Zeichnung der Kernfläche}
+    \end{subfigure}
+    \caption{TM2 WiSe~21/22, Nr.~8 Kernfläche}
+    \label{fig:TM2WiSe2122Nr8_3}
+\end{figure}
 
 
 
@@ -520,4 +767,121 @@ geprüft werden, welcher Winkel eher zur Skizze passt.
 
 \subsection{Schubspannung und SMP (TM2 SoSe 24 Nr.~8)}
 
+Der Großteil der Schubspannungsrechnung sollte selbsterklärend sein. Querschnitt zeichnen, Taste \taste{b} Schubspannung
+auswählen, Verlauf auswählen und abzeichnen. Danach mit Taste \taste{v} den nächsten Verlauf wählen...\\
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{./fig/TM2/SoSe24nr8_1.png}
+    \caption{TM2 SoSe~24, Nr.~8 im Programm}
+    \label{fig:TM2SoSe24Nr8_1}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/SoSe24nr8_2.png}
+        \caption{$z-h$-Linie}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/SoSe24nr8_3.png}
+        \caption{$S_y$}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/SoSe24nr8_4.png}
+        \caption{$\tau_z$}
+    \end{subfigure}
+    \caption{TM2 SoSe~24, Nr.~8 Verläufe für Schubspannung}
+    \label{fig:TM2SoSe24Nr8_2}
+\end{figure}
+
+In Abbildung \ref{fig:TM2SoSe24Nr8_3} ist die Rechnung zum Schubmittelpunkt dargestellt. Beim Aufruf dieser
+Rechnung wird erst einmal nur der SMP mit seiner Koordinate gezeichnet (diese beziehen sich auf das gezeichnete KOS,
+nicht auf den Schwerpunkt, daher kommt die Abweichung zur Musterlösung: $23{,}99 - 1{,}20 = 22{,}79$~mm). Nach Drücken der Taste \taste{t} steht
+die Rechnungstabelle zur Verfügung. Die ersten zwei Spalten sind für die Aufgabe nicht direkt relevant.
+Die Lage des Schubmittelpunkts in $z$-Richtung folgt sofort aus der Symmetrie.
+Die Spalte z-Last stellt die Teilschubkraft der jeweiligen Elemente dar, dahinter steht der Hebel den diese
+Teilschubkraft bzgl. des Schwerpunkts hat. Wie oben bereits erwähnt können hier auch negative Vorzeichen für den
+Hebelarm auftreten. Die Werte gelten für die Einheitslast $Q_z = 1$~N (Kopfzeile der Tabelle). Mit
+$Q_z = 900$~N werden aus $0{,}3333$ und $1{,}0$ die $T_1 = T_4 = 300$~N und $T_2 = T_3 = 900$~N der
+Musterlösung, und die Hebel $10$ und $8{,}06$~mm sind genau die aus ihrem alternativen Weg (Momente
+um den Schwerpunkt). $M_{ges} = 0{,}0228$~Nm $= 22{,}79$~Nmm je Newton ist damit direkt der Abstand des
+Schubmittelpunkts vom Schwerpunkt in mm. Den ersten Weg der Musterlösung (Momente um den Knick, durch
+den beide Schrägen laufen) rechnet das Programm nicht. Er ist von Hand aber kürzer, weil dort nur die
+beiden Gurte einen Hebel haben.
+
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/SoSe24nr8_6.png}
+        \caption{Schubmittelpunkt}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{./fig/TM2/SoSe24nr8_7.png}
+        \caption{Tabelle zum Schubmittelpunkt}
+    \end{subfigure}
+    \caption{TM2 SoSe~24, Nr.~8 Rechnung für Schubmittelpunkt}
+    \label{fig:TM2SoSe24Nr8_3}
+\end{figure}
+
+Die Schubspannung aus Torsion kann über die Schubspannungsrechnung aufgerufen werden. Der Verlauf für dieses Profil
+ist in Abbildung \ref{fig:TM2SoSe24Nr8_4} dargestellt. \\
+Ich möchte kurz darauf eingehen, dass das Vorzeichen bei dünnwandigen offenen Profilen nicht wirklich aussagekräftig ist,
+wenn am linken Rand des Profilelements die Schubspannung negativ ist, ist sie am rechten Rand positiv und umgekehrt.
+Wenn also nach dem Verlauf der gesamten Schubspannung gefragt wird ist das einzige sinnvolle Ergebnis eins, bei dem die
+\textbf{Beträge} der Schubspannung aus Torsion und Querkraft addiert werden, evtl.\ dann mit dem Vorzeichen der Querkraft versehen.
+
+Genau so macht es auch das Programm. Im Verlauf~9 (Gesamtschubspannung) addiert es bei offenen
+Wänden die Beträge und gibt dem Ergebnis die Richtung von $\tau_Q$, ohne Querkraft die von $M_T$. Im
+Torsionsanteil (Verlauf~8) zeigt es bei offenen Wänden den Wert am rechten Rand in Laufrichtung,
+alle offenen Wände haben dort das Vorzeichen von $M_T$ (Abschnitt Torsion). Hier wirkt $F$ rechts
+vom Schubmittelpunkt nach unten, also ist $M_T = -900~\text{N} \cdot 6{,}67~\text{mm} = -6000$~Nmm,
+und das Programm zeigt überall negative Werte, $-24{,}26$ und $-36{,}39$~MPa, wie die Musterlösung.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{./fig/TM2/SoSe24nr8_5.png}
+    \caption{TM2 SoSe~24, Nr.~8 Schubspannung aus Torsion}
+    \label{fig:TM2SoSe24Nr8_4}
+\end{figure}
+
+Warum die Musterlösung für die beiden linken Teile einen linearen Verlauf ansetzt ist mir nicht klar.
+Physikalisch ist $\tau_T = M_T\,t/I_T$ entlang jeder Wand konstant, weil es nur von der Dicke abhängt.
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{./fig/TM2/SoSe24nr8_8.png}
+    \caption{TM2 SoSe~24, Nr.~8 Maximale Schubspannung aus Torsion mit Kraft im Schwerpunkt}
+    \label{fig:TM2SoSe24Nr8_5}
+\end{figure}
+
+Der Maximalwert der Schubspannung aus Torsion kann entweder aus dem Diagramm abgelesen werden oder aus dem Ergebnisfeld unten.
+Dafür setzt ihr die Kraft in den Schwerpunkt. Wichtig ist der Profilbeiwert $\xi = 1{,}06$ aus der
+Aufgabe (Optionsmenü \taste{o}). Ab Werk rechnet das Programm mit $\xi = 1$, dann käme
+$131{,}9$ statt $124{,}4$~MPa heraus. Das \code{tau\_gesamt,max} im Ergebnisfeld ($141{,}9$~MPa) ist
+dagegen die Summe aus Torsion und Querkraft und hier nicht gefragt.
+
 \subsection{Verwölbung (TM2 SoSe 20 Nr.~9)}
+
+Auch hier gibt es nicht viel zu sagen, eingeben und abzeichnen.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\linewidth]{./fig/TM2/SoSe20nr9_1.png}
+    \caption{TM2 SoSe~20, Nr.~9 Verwölbung}
+    \label{fig:TM2SoSe20Nr9_1}
+\end{figure}
+
+\section{Statik}
+
+Da ich die Statik Klausur selber noch nicht geschrieben habe, und mich somit auch noch nicht auf diese vorbereitet habe,
+habe ich leider noch kein Gefühl dafür, was typische Klausuraufgaben sind. Somit muss ich diesen Abschnitt für Statik leider leer lassen. 

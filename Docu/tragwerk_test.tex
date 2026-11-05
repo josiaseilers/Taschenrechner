@@ -1,0 +1,132 @@
+% Symboltafel und Nachbau zweier Klausurbilder fuer tragwerk.sty (Stil des ISD).
+% Uebersetzen: pdflatex tragwerk_test.tex
+\documentclass[12pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[ngerman]{babel}
+\usepackage[a4paper,margin=2cm]{geometry}
+\usepackage{tragwerk}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\begin{document}
+
+\section*{Symboltafel \texttt{tragwerk.sty}}
+
+\textbf{Stäbe und Gelenke}\par\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{0}\Knoten{b}{2}{0}\Stab{a}{b}\Beschriftung[below=6pt]{$(a)!0.5!(b)$}{\small\texttt{\textbackslash Stab} (Faser rechts)}
+  \Knoten{c}{3}{0}\Knoten{d}{5}{0}\Stab[faser=links]{c}{d}\Beschriftung[below=6pt]{$(c)!0.5!(d)$}{\small\texttt{faser=links}}
+  \Knoten{e}{6}{0}\Knoten{f}{8}{0}\Bogen{e}{f}{1.5}\Beschriftung[below=6pt]{$(e)!0.5!(f)$}{\small\texttt{\textbackslash Bogen}}
+  \Knoten{g}{9}{0}\Knoten{h}{11}{0}\Stab[faser=keine]{g}{h}\Beschriftung[below=6pt]{$(g)!0.5!(h)$}{\small\texttt{faser=keine}}
+\end{tragwerk}
+
+\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{0}\Knoten{b}{1}{0}\Knoten{c}{2}{0}\Stab{a}{b}\Stab{b}{c}\Gelenk{b}
+  \Beschriftung[below=8pt]{b}{\small\texttt{\textbackslash Gelenk}}
+  \Knoten{d}{3}{0}\Knoten{e}{5}{0}\Knoten{f}{4}{0}\Knoten{f2}{4}{-1}\Stab{d}{e}\Stab{f}{f2}\Angelenk{f}
+  \Beschriftung[below=4pt]{f2}{\small\texttt{\textbackslash Angelenk}}
+  \Knoten{g}{6}{0}\Knoten{h}{7}{0}\Knoten{i}{8}{0}\Stab{g}{h}\Stab{h}{i}\QGelenk{h}
+  \Beschriftung[below=8pt]{h}{\small\texttt{\textbackslash QGelenk}}
+  \Knoten{j}{9}{0}\Knoten{k}{10}{0}\Knoten{l}{11}{0}\Stab{j}{k}\Stab{k}{l}\NGelenk{k}
+  \Beschriftung[below=8pt]{k}{\small\texttt{\textbackslash NGelenk}}
+\end{tragwerk}
+
+\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{1}\Knoten{b}{0}{0}\Knoten{c}{1.2}{0}
+  \Stab[faser=links,faser ende=2.2pt]{a}{b}\Stab[faser anfang=2.2pt]{b}{c}\Ecke{b}{a}{c}
+  \Beschriftung[below=8pt]{b}{\small\texttt{\textbackslash Ecke}, Faser außen}
+\end{tragwerk}
+
+\bigskip\textbf{Lager} (Winkel 0, 90, 180, 270; \texttt{halb} bei durchlaufendem Stab)\par\medskip
+\begin{tragwerk}
+  \foreach \x/\w in {0/0,1.2/90,2.4/180,3.6/270}{\Knoten{p}{\x}{0}\Festlager[\w]{p}}
+  \Beschriftung[below=24pt]{1.8,0}{\small\texttt{\textbackslash Festlager}}
+  \foreach \x/\w in {5.4/0,6.6/90,7.8/180,9.0/270}{\Knoten{p}{\x}{0}\Loslager[\w]{p}}
+  \Beschriftung[below=24pt]{7.2,0}{\small\texttt{\textbackslash Loslager}}
+\end{tragwerk}
+
+\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{0.8}\Knoten{b}{0}{0}\Stab{a}{b}\Einspannung{b}\Beschriftung[below=10pt]{b}{\small\texttt{\textbackslash Einspannung}}
+  \Knoten{c}{2}{0.8}\Knoten{d}{2}{0}\Stab{c}{d}\Fuehrung{d}\Beschriftung[below=24pt]{d}{\small\texttt{\textbackslash Fuehrung}}
+  \Knoten{e}{4}{0.8}\Knoten{f}{4}{0}\Stab{e}{f}\Feder{f}\Beschriftung[below=26pt]{f}{\small\texttt{\textbackslash Feder}}
+  \Knoten{g}{6}{0.8}\Knoten{h}{6}{0}\Stab{g}{h}\Drehfeder{h}\Beschriftung[below=16pt]{h}{\small\texttt{\textbackslash Drehfeder}}
+  \Knoten{i}{8}{0}\Knoten{j}{10}{0}\Stab{i}{j}\Knoten{k}{9}{0}\Loslager[0,halb]{k}\Beschriftung[below=24pt]{k}{\small\texttt{[0,halb]}}
+  \Lagername[-30]{h}{A}
+\end{tragwerk}
+
+\bigskip\textbf{Lasten}\par\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{0}\Knoten{b}{1.5}{0}\Stab{a}{b}\Knoten{m}{0.75}{0}
+  \Kraft{m}{-90}{F}\Beschriftung[below=8pt]{m}{\small drückend}
+  \Knoten{c}{2.5}{0}\Knoten{d}{4}{0}\Stab{c}{d}\Knoten{n}{3.25}{0}
+  \Kraft[ziehend, abstand=4pt]{n}{90}{F}\Beschriftung[below=8pt]{n}{\small\texttt{ziehend}}
+  \Knoten{e}{5}{0}\Knoten{f}{6.5}{0}\Stab{e}{f}\Knoten{o}{5.75}{0}
+  \Moment[punkt]{o}{M}\Beschriftung[below=18pt]{o}{\small\texttt{\textbackslash Moment[punkt]}}
+  \Knoten{g}{7.5}{0}\Knoten{h}{9}{0}\Stab{g}{h}
+  \Moment[uhrzeigersinn, luecke=180]{g}{M$_0$}\Beschriftung[below=18pt]{$(g)!0.5!(h)$}{\small\texttt{uhrzeigersinn}}
+\end{tragwerk}
+
+\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{0}\Knoten{b}{3}{0}\Streckenlast{a}{b}{1}{1}{q}\Stab{a}{b}
+  \Knoten{c}{4}{0}\Knoten{d}{7}{0}\Streckenlast{c}{d}{0}{1}{q$_0$}\Stab{c}{d}
+  \Knoten{e}{8}{0}\Knoten{f}{11}{0}\Streckenlast[text an=ende]{e}{f}{1}{2}{2q}\Stab{e}{f}
+  \Beschriftung[below=8pt]{$(a)!0.5!(b)$}{\small konstant}
+  \Beschriftung[below=8pt]{$(c)!0.5!(d)$}{\small Dreieck}
+  \Beschriftung[below=8pt]{$(e)!0.5!(f)$}{\small Trapez}
+\end{tragwerk}
+
+\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{0}\Knoten{b}{2}{2}\Streckenlast[richtung=-90]{a}{b}{1}{1}{q}\Stab{a}{b}
+  \Beschriftung[below=10pt]{1,0}{\small\texttt{richtung=-90} (global)}
+  \Knoten{c}{4}{0}\Knoten{d}{6}{2}\Streckenlast[ziehend]{c}{d}{1}{1}{q}\Stab{c}{d}
+  \Beschriftung[below=10pt]{5,0}{\small\texttt{ziehend}}
+  \Knoten{e}{8}{0}\Knoten{f}{8}{2.5}\Stab{e}{f}\Laengslast{e}{f}{n}
+  \Beschriftung[below=10pt]{e}{\small\texttt{\textbackslash Laengslast}}
+\end{tragwerk}
+
+\bigskip\textbf{Bemaßung und Beschriftung}\par\medskip
+\begin{tragwerk}
+  \Knoten{a}{0}{0}\Knoten{b}{2}{0}\Knoten{c}{5}{0}\Knoten{d}{5}{2}
+  \Stab{a}{b}\Stab{b}{c}\Stab{c}{d}\Stabnummer{a}{b}{1}\Stabnummer{b}{c}{2}\Stabnummer[rechts]{c}{d}{3}
+  \MassH{a}{b}{-0.8}{2}\MassH{b}{c}{-0.8}{3}\MassV{d}{c}{6}{2}
+  \Einheit{7,-0.8}{[m]}\KOS{-1.2,1}
+\end{tragwerk}
+
+\newpage
+\section*{Nachbau: TM1 SoSe 22, Aufgabe 2}
+\begin{tragwerk}[einheit=1cm, symbolgroesse=0.77, gelenkradius=4.27]
+  \Knoten{A}{0}{7}\Knoten{E}{0}{3}\Knoten{G}{3}{3}\Knoten{C}{5}{5}\Knoten{B}{3}{0}
+  \Knoten{Mp}{1.5}{3}\Knoten{Fp}{3}{1.5}
+  \Streckenlast[seite=links, richtung=-90, pfeilabstand=10.8, kuerzen ende=10, text=135]{G}{C}{1}{1}{q}
+  \Stab[faser ende=2.2pt]{A}{E}\Stab[faser anfang=2.2pt]{E}{G}\Stab{G}{C}\Stab{G}{B}
+  \Ecke{E}{A}{G}\Gelenk{G}
+  \Loslager[180]{A}\Festlager[180]{C}\Festlager{B}
+  \Lagername[160]{A}{A}\Lagername[20]{C}{C}\Lagername[-30]{B}{B}
+  \Moment[luecke=210, punkt]{Mp}{M}
+  \Kraft[ziehend, abstand=5pt]{Fp}{0}{F}
+  \MassV{A}{C}{-2}{2}\MassV{C}{E}{-2}{2}\MassV{E}{Fp}{-2}{1.5}\MassV{Fp}{B}{-2}{1.5}
+  \MassH{E}{Mp}{-1.2}{1.5}\MassH{Mp}{B}{-1.2}{1.5}\MassH{B}{C}{-1.2}{2}
+  \node at (8,3) {[m]};
+\end{tragwerk}
+
+\section*{Nachbau: TM1 WiSe 24, Aufgabe 4}
+\begin{tragwerk}[einheit=1.33cm]
+  \Knoten{A}{0}{0}\Knoten{E1}{0}{2}\Knoten{B}{2}{3}\Knoten{E2}{2}{5}\Knoten{E3}{5}{5}
+  \Knoten{C}{5}{0}\Knoten{Fp}{5}{2}
+  \Streckenlast[seite=links, richtung=0, text=150, text an=ende, kuerzen anfang=4, kuerzen ende=12]{A}{E1}{1}{1}{8\,kN/m}
+  \Stab{A}{E1}\Stab{E1}{B}\Stab{B}{E2}\Stab{E2}{E3}\Stab{E3}{C}
+  \Ecke{E1}{A}{B}\Ecke{E2}{B}{E3}\Ecke{E3}{E2}{C}
+  \Loslager{A}\Festlager{C}\Loslager[90]{B}
+  \Lagername[200]{A}{A}\Lagername[200]{C}{C}\Lagername[40]{B}{B}
+  \Kraft[ziehend, abstand=5pt]{Fp}{0}{4\,kN}
+  \MassV{E2}{B}{-1.8}{2m}\MassV{B}{E1}{-1.8}{1m}\MassV{E1}{A}{-1.8}{2m}
+  \MassV{E3}{Fp}{8.2}{3m}\MassV{Fp}{C}{8.2}{2m}
+  \MassH{A}{B}{-1.5}{2m}\MassH{B}{C}{-1.5}{3m}
+\end{tragwerk}
+
+\end{document}

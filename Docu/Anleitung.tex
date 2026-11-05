@@ -34,12 +34,7 @@
 
 \newcommand{\taste}[1]{\textsf{\textbf{#1}}}
 \newcommand{\code}[1]{\texttt{#1}}
-\newcommand{\bildplatz}[2]{%
-  \begin{figure}[htbp]
-    \centering
-    \fbox{\parbox[c][3.0cm][c]{0.78\linewidth}{\centering\itshape Platz für ein Bild: \texttt{#1}}}
-    \caption{#2}
-  \end{figure}}
+
 
 \title{Anleitung\\[0.3em]\large Tragwerksskript und Querschnittsskript für den TI-Nspire CX II CAS}
 \author{}
@@ -47,11 +42,34 @@
 
 \begin{document}
 \maketitle
+
+\begin{center}
+\begin{minipage}{0.9\linewidth}
+\color{red}
+\textbf{Vorwort}\par\smallskip
+Bitte lasst euch vom Umfang dieser Anleitung nicht abschrecken: Für den Einstieg
+reichen Abschnitt~\ref{sec:grundlegendes} und die Abschnitte zu eurem Modul, der Rest ist zum
+Nachschlagen. Das sind dann nur noch 10 bis 20 Seiten.\\
+Die drei Skripte sollen euch in \textbf{TM1}, \textbf{TM2} und \textbf{Statik} beim Rechnen und
+Kontrollieren helfen. Sie ersetzen das Verständnis nicht: In der Klausur zählt euer Rechenweg, das
+Programm liefert Ergebnisse und Lösungswege zum Vergleichen. Vieles ist mit Handrechnungen und
+automatischen Tests geprüft, Fehler sind trotzdem möglich. Schaut deshalb immer, ob ein Ergebnis
+plausibel ist, gerade bei ungewöhnlichen Systemen.\\
+Für die, die in der Klausur eine 1,0 haben wollen, ist dieses Programm vermutlich nicht das Richtige:
+Mit einer Handrechnung ist man immer schneller, als wenn man eine Lösung abschreibt (vorausgesetzt,
+man hat entsprechend geübt).\\
+Ich halte es für eine sinnvolle Idee, dieses Programm vielleicht nicht direkt den Leuten vom ISD zu zeigen,
+da das natürlich dazu führen könnte, dass die Klausuren entsprechend angepasst werden.\\
+Fehler, Fragen und Ideen nehme ich gerne entgegen, erreichen kann man mich per Mail \emph{holzwarthbenjamin@gmail.com}.
+Bei Fehlern oder Abstürzen ist natürlich eine genaue Problembeschreibung hilfreich.
+\end{minipage}
+\end{center}
+
 \tableofcontents
 \newpage
 
 %=====================================================================
-\section{Grundlegendes}
+\section{Grundlegendes}\label{sec:grundlegendes}
 
 \subsection{Überblick}
 
@@ -79,21 +97,23 @@ Was in welchem Modul drankommt und welcher Teil des Programms dazu passt:
     mehrteilige Tragwerke, Fachwerke, Schnittgrößen, Prinzip der virtuellen Verrückung (PvV),
     Reibung &
     Explosionszeichnung und LGS-Export (Abschnitt~\ref{sec:Explosionszeichnung}), Fachwerke,
-    $N$-/$Q$-/$M$-Verläufe, PvV mit Polplan und Arbeitssatz; Schwerpunkt im Querschnittsskript \\
+    $N$-/$Q$-/$M$-Verläufe, PvV mit Polplan und Arbeitssatz. Schwerpunkt im Querschnittsskript \\
   \textbf{TM2} & Flächenträgheitsmomente, Spannung, Dehnung, Mohrscher Spannungskreis,
     Elastizitätsgesetz, Biegetheorie und DGL der Biegelinie, Normalspannung und Kernfläche,
     Schubspannung (auch dünnwandig), Torsion, Drillung und Verwölbung &
     Querschnittsskript, Spannungskreis, Biegelinie und Längslinie (Rand-LGS-Export), starre
     Stäbe, Temperatur \\
   \textbf{Statik} & fast ausschließlich statisch unbestimmte Systeme: Arbeitssatz und Prinzip der
-    virtuellen Kräfte, Kraftgrößenverfahren (Reduktionssatz, Symmetrie), Weggrößenverfahren/FEM,
-    Galerkin, Scheiben &
+    virtuellen Kräfte, Kraftgrößenverfahren (Reduktionssatz, Symmetrie), Weggrößenverfahren/FEM&
     KGV mit Einheitszuständen und $\delta$-Zahlen, Systemmatrizen des WGV, richtige Steifigkeiten
     ($EI$-Verhältnisse, dehnstarr), Temperatur \\
   \bottomrule
 \end{longtable}
 
-Nicht im Programm sind Reibung, räumliche Kräftesysteme, Galerkin und Scheiben.
+Nicht im Programm sind Reibung, räumliche Kräftesysteme und kompliziertere Schwerpunktaufgaben.
+Genauso sind Ritterschnitt und K-Schnitt nicht im Programm. Umsetzbar wären sie, aber die
+Fachwerke, an denen sie in der Klausur drankommen, sind meist so groß, dass sich das Eingeben nicht
+lohnt (Abschnitt~\ref{sec:fachwerk}).
 
 Für die meisten Exporte und für symbolische Berechnungen wird meines Wissens die
 \textbf{CAS}-Version des Rechners gebraucht. Da bin ich mir aber nicht ganz sicher. Der Grund:
@@ -108,15 +128,62 @@ und so weiter.
 
 \subsection{Grundprinzip der Bedienung}
 
+\subsubsection{Koordinatensysteme}\label{sec:kos}
+
+Jedes Skript hat sein eigenes Koordinatensystem. Davon hängen die Vorzeichen aller Eingaben und
+Ergebnisse ab, deshalb lohnt es sich, die drei einmal zu kennen.
+
+\textbf{Tragwerksskript}
+\begin{itemize}
+  \item \textbf{Global:} $x$ nach rechts, $y$ nach \emph{unten}. So rechnet das Weggrößenverfahren
+        der Statik-Vorlesung, auf dem das Programm aufbaut ($z^g$ nach unten). Deshalb sind
+        Knotenlasten $F_y$ und Streckenlasten $q$, $p_Y$ nach unten positiv.
+  \item \textbf{Lokal je Stab:} $x$ vom Anfangs- zum Endknoten, quer dazu zur \emph{gestrichelten
+        Faser}. $q$ zeigt positiv zur gestrichelten Faser, $M$ ist positiv bei Zug an ihr.
+  \item \textbf{Winkel und Momente} (Last- und Lagerwinkel, Knotenmomente, Verdrehungen) zählen
+        gegen den Uhrzeigersinn positiv, so wie ihr auf das Bild schaut, auch wenn $y$ nach unten
+        zeigt.
+  \item \textbf{Auflagerkräfte} $R_\xi$ nach rechts, $R_\eta$ nach \emph{oben} (bei gedrehtem
+        Lager in Lagerrichtung), $R_m$ gegen den Uhrzeigersinn, wie in der FEM-Formelsammlung.
+        $R_\eta$ zählt also andersherum als $y$.
+\end{itemize}
+Die Gegenüberstellung mit WGV und FEM steht in Abschnitt~\ref{sec:wgv-vorzeichen}.
+
+\textbf{Querschnittsskript}
+\begin{itemize}
+  \item Der Querschnitt liegt in der Bildebene, die Stabachse $x$ zeigt aus ihr heraus auf euch zu
+        (rechtshändig). Ab Werk zeigt $y$ nach links und $z$ nach unten, so sind die Querschnitte in
+        TM2-Aufgaben häufig gezeichnet. Eine Kraft aus der Ebene erscheint deshalb (Ebene $yz$) als
+        Punkt, wenn sie in $+x$ zeigt, und als Kreuz, wenn sie hineinzeigt.
+  \item Das KOS dreht ihr in Schritten von $90^\circ$, die Ebene ($yz$, $xy$, $xz$) stellt ihr im
+        Optionsmenü um. Alle Ein- und Ausgaben (Koordinaten, Trägheitsmomente, Schnittgrößen,
+        Spannungen) beziehen sich auf das \emph{angezeigte} KOS. So passt ihr das KOS an die
+        Aufgabe an, statt Vorzeichen umzurechnen.
+  \item Die Vorzeichen sind die aus dem Gross: $I_{yz} = -\int y\,z\,dA$, und ein positives $M_y$
+        macht Zug bei positivem $z$.
+\end{itemize}
+Mehr dazu in Abschnitt~\ref{sec:qs-kos}.
+
+\textbf{Spannungskreis}
+\begin{itemize}
+  \item \textbf{Spannungsscheibe:} $x$ nach \emph{unten}, $y$ nach rechts. Der Winkel $\alpha$ der
+        Schnittnormalen zählt von $x$ aus gegen den Uhrzeigersinn. Mit dieser Lage der Achsen dreht
+        ein wachsendes $\alpha$ auch auf dem Bildschirm gegen den Uhrzeigersinn.
+  \item $\sigma$ ist als Zug positiv. $\tau$ ist in jedem Schnitt positiv, wenn sie die Scheibe gegen
+        den Uhrzeigersinn dreht. Damit gilt für jeden Schnitt dieselbe Regel, egal wie er liegt. Im
+        Schnitt $\alpha = 90^\circ$ steht deshalb $-\tau_{xy}$.
+  \item \textbf{Mohrscher Kreis:} $\sigma$ nach rechts, $\tau$ nach oben. Bei wachsendem $\alpha$
+        wandern die Punkte im Uhrzeigersinn um den Winkel $2\alpha$.
+\end{itemize}
+Mehr dazu in Abschnitt~\ref{sec:kreis-eingabe}.
+
 \subsubsection{Tragwerk- und Querschnittmodul}
 
 \begin{itemize}
   \item Gezeichnet wird mit der Maus bzw. dem Touchpad, Punkte rasten auf dem Raster ein.
   \item Ein Objekt unter dem Mauszeiger (\emph{Hover}) wird hervorgehoben. \taste{Enter} öffnet
-        dessen Menü. \taste{Del} löscht im Tragwerksskript das gehoverte Element, im
-        Querschnittsskript das zuletzt gezeichnete (einzelne Elemente löscht ihr dort über ihr
-        Menü).
-  \item Obermenü mit Taste \taste{o}. In Menüs bewegt man sich mit den Pfeiltasten \taste{$\uparrow$}/\taste{$\downarrow$};
+        dessen Menü. \taste{Del} löscht in beiden Skripten das gehoverte Element.
+  \item Obermenü mit Taste \taste{o}. In Menüs bewegt man sich mit den Pfeiltasten \taste{$\uparrow$}/\taste{$\downarrow$}.
         \taste{$\leftarrow$}/\taste{$\rightarrow$} blättert die Seiten. \taste{Enter} öffnet eine
         Eingabe oder schaltet einen Wert um, ein zweites \taste{Enter} übernimmt die Eingabe.
   \item Auf der Zeichenfläche selber wird mit \taste{$\uparrow$}/\taste{$\downarrow$} und
@@ -125,8 +192,9 @@ und so weiter.
         ins Bild passt.
   \item \taste{Esc} bricht ab und schließt Boxen, \taste{ctrl}+\taste{Del} oder \taste{c} löscht alles.
   \item Alle Zahlenfelder akzeptieren Ausdrücke: \code{2/3}, \code{sqrt(2)}, \code{1e8},
-        Dezimalkomma (\code{1,5}) und im Tragwerksskript auch Symbole wie \code{q} oder \code{EI}.
-        Im Querschnittsskript geht \code{\^{}} nicht, dort schreibt ihr \code{1e6} statt \code{10\^{}6}.
+        \code{10\^{}6}, \code{1.2*10\^{}-5}, Dezimalkomma (\code{1,5}) und im Tragwerksskript auch
+        Symbole wie \code{q} oder \code{EI}. Im Querschnittsskript gehen auch die Tasten
+        $x^2$, \textsf{EE} und $\pi$.
 \end{itemize}
 
 %=====================================================================
@@ -135,8 +203,7 @@ und so weiter.
 \section{Systemeingabe}
 
 Die eigentliche Systemberechnung läuft über das WGV (kommt in Statik). Aus diesem Grund mag die
-Art, Systeme zu zeichnen, manchmal etwas unintuitiv wirken, z.\,B.\ wird die $y$-Achse positiv
-nach unten gezählt.
+Art, Systeme zu zeichnen, manchmal etwas unintuitiv wirken, z.B. die komisch wirkende Wahl des KOS.
 
 Die zwei grundlegenden Bausteine eines Systems sind Elemente bzw.\ Stäbe und Knoten. Knoten könnt
 ihr überall platzieren (einfach mit dem Touchpad an eine Stelle klicken), Stäbe nur von einem
@@ -178,13 +245,13 @@ anklicken müsst ihr nicht. Das Menü hat vier Seiten, zwischen denen ihr mit
   2 Lasten & Last $F_x$, Last $F_y$, Last $M$, Lastwinkel &
     Einzellasten am Knoten. Der Winkel dreht das Lastpaar $F_x$/$F_y$ mit. \\
   3 Federn & Feder $c_x$, $c_y$, $c_m$, Federwinkel &
-    Weg- und Drehfedern; der Winkel dreht die Federachsen. Federwerte dürfen symbolisch sein,
+    Weg- und Drehfedern. Der Winkel dreht die Federachsen. Federwerte dürfen symbolisch sein,
     z.\,B.\ \code{3*EA*l}. \\
   4 Ergebnisse & Verschiebung, $R_\xi$, $R_\eta$, $R_m$, \code{ü\_x}, \code{ü\_y}, \code{ü\_ges},
     $\varphi$, In TI speichern &
     Ganz oben holt \emph{Verschiebung} die Knotenverschiebung als Formel aus dem Rand-LGS
     (Abschnitt~\ref{sec:knotenverschiebung}). Darunter stehen nach der Berechnung die
-    Auflagerreaktionen in Lagerrichtung und die Knotenverschiebung als Zahl; ganz unten könnt ihr
+    Auflagerreaktionen in Lagerrichtung und die Knotenverschiebung als Zahl. Ganz unten könnt ihr
     den Knoten einzeln ins CAS exportieren. \\
   \bottomrule
 \end{longtable}
@@ -195,7 +262,9 @@ Auflagerkräfte werden auch in diesen Richtungen ausgegeben.
 
 \taste{Del} auf einem Knoten löscht auch alle Stäbe, die daran hängen. Die übrigen Knoten
 werden dabei neu durchnummeriert, damit verschieben sich auch die Lagerbuchstaben $A$, $B$, \dots\
-der Explosionszeichnung.
+der Explosionszeichnung. Ist gerade das Menü eines Knotens oder Stabes offen, bleibt es beim
+selben Element (auch wenn es eine neue Nummer bekommt). Löscht ihr genau dieses Element, geht das
+Menü zu. Im PvV-Modus löscht \taste{Del} nichts, beendet ihn vorher mit \taste{Esc}.
 
 Ich möchte hier einmal auf den Unterschied zwischen Voll- und Angelenk hinweisen: Vollgelenke
 werden über den Knoten eingegeben, Angelenke über den Stab (siehe Abschnitt~\ref{sec:Eingabe_Stäbe}).
@@ -244,9 +313,11 @@ $R_\eta$ zählt nach \emph{oben} positiv, also andersherum als die $y$-Achse des
 $R_m$ gegen den Uhrzeigersinn. Um an Auflagerkräfte dranzukommen, gibt es aber bessere Methoden
 (siehe Abschnitt~\ref{sec:Explosionszeichnung}).
 
-Die Knotenverschiebung wird in Metern angegeben, die Verdrehung in rad. Bei Stäben mit Gelenken,
+Die Knotenverschiebung wird in Metern angegeben, die Verdrehung in rad, beides als
+Zehnerpotenz (\code{1.234·10\^{}-5}), damit auch kleine Werte nicht als 0 erscheinen. Dasselbe
+gilt für die Stabendverformungen auf Seite~7 des Stabmenüs. Bei Stäben mit Gelenken,
 gerade bei Angelenken, ist die Knotenverdrehung jedoch mit Vorsicht zu genießen
-(Abschnitt~\ref{sec:mathe-gelenke}). Wollt ihr die Verschiebung als Formel, z.\,B.\
+(Abschnitt~\ref{sec:mathe-gelenke})! Wollt ihr die Verschiebung als Formel, z.\,B.\
 $\frac{F l^3}{3EI}$, nehmt die Zeile \emph{Verschiebung} ganz oben auf Seite~4
 (Abschnitt~\ref{sec:knotenverschiebung}).
 
@@ -266,13 +337,14 @@ und die Gelenke an seinen Enden. Auch hier: Zeiger auf den Stab, \taste{Enter}, 
   1 Steifigkeit und Lasten & $EI$, \emph{biegesteif}, $EA$, \emph{dehnsteif}, Last $q(x)$,
     Last $n(x)$, Momentenlast $m$, Bogenradius &
     $q$ wirkt quer, $n$ längs, $m$ ist ein Streckenmoment. \emph{biegesteif}/\emph{dehnsteif}
-    machen den Stab starr (Abschnitt~\ref{sec:starr}); das zugehörige Feld ist dann gesperrt und
+    machen den Stab starr (Abschnitt~\ref{sec:starr}). Das zugehörige Feld ist dann gesperrt und
     zeigt \emph{starr}. Ein Bogenradius $\ne 0$ macht aus dem Stab einen Kreisbogen. Das geht
     nur, wenn $|R|$ mindestens die halbe Stablänge ist, sonst bleibt der Stab gerade. Das
-    Vorzeichen von $R$ legt fest, zu welcher Seite der Bogen gekrümmt ist. \\
+    Vorzeichen von $R$ legt fest, zu welcher Seite der Bogen gekrümmt ist: Bei $R > 0$ liegt der
+    Mittelpunkt auf der Seite der gestrichelten Faser (sie liegt innen), bei $R < 0$ auf der
+    anderen Seite (sie liegt außen). \\
   2 Globale Linienlasten & Global $p_X$, $p_X$ projiziert, Global $p_Y$, $p_Y$ projiziert &
-    Lasten in globaler Richtung, wahlweise auf die Stabachse projiziert, also genau die
-    Unterscheidung \enquote{Schnee auf der Dachfläche} gegen \enquote{Schnee auf dem Grundriss}.
+    Lasten in globaler Richtung, wahlweise auf die Stabachse projiziert.
     Hängt die Last von $x$ ab, läuft $x$ bei projizierter Last entlang der globalen Achse ab dem
     Stabanfang ($p_Y$ waagerecht, $p_X$ senkrecht), sonst entlang des Stabes. \\
   3 Trapezlasten und Temperatur & Trapez $q$ Start/Ende, Trapez $n$ Start/Ende,
@@ -288,7 +360,7 @@ und die Gelenke an seinen Enden. Auch hier: Zeiger auf den Stab, \taste{Enter}, 
     oben und $M_a$ im Uhrzeigersinn, am Ende $h_b$ nach rechts, $v_b$ nach unten und $M_b$ gegen
     den Uhrzeigersinn, also wie positive Schnittgrößen am Stab. \\
   7 Verformungen und Export & $u_a$, $v_a$, $\varphi_a$, \dots, \emph{In TI speichern} &
-    Stabendverformungen; Export des einzelnen Stabes ins CAS. \\
+    Stabendverformungen. Export des einzelnen Stabes ins CAS. \\
   \bottomrule
 \end{longtable}
 
@@ -298,27 +370,44 @@ Ein paar Dinge, die ihr zu den Seiten wissen solltet:
   \item Die Gelenke auf Seite 4 sind die \textbf{Angelenke} aus Abb.~\ref{fig:Knotenverbindungen}:
         Sie sitzen am Stabende, der Knoten selbst bleibt biegesteif mit den anderen Stäben
         verbunden. Ein N- oder Q-Gelenk gibt es nur hier, am Knoten geht nur das Vollgelenk. Das liegt daran,
-        dass sich N- und Q-Gelenke auf die Richtung des Stabes beziehen (längs bzw.\ quer zur
-        Stabachse), ein Knoten hat aber keine Richtung.
+        dass N- und Q-Gelenke eine Richtung brauchen: Ein Stab hat eine, ein Knoten nicht (dazu
+        kommt die Rechnung, Abschnitt~\ref{sec:mathe-gelenke}).
   \item Für \textbf{TM1} solltet ihr nicht an den Biege- und Dehnsteifigkeiten rumspielen, weder im Stab noch im Obermenü.
         Solltet ihr dort doch einmal etwas eingegeben haben, drückt am besten im Obermenü (Seite~1) einmal auf \emph{Starr-Modus: Aktivieren}.
-        An diese Zahlen ist eine Warnung gekoppelt, die kommt, wenn ihr versucht, ein statisch unbestimmtes System zu berechnen. In der \textbf{TM1} habt ihr dann etwas falsch eingegeben.
+        Das Ergebnis stimmt in der \textbf{TM1} zwar trotzdem, aber an diese Zahlen ist eine Warnung gekoppelt, die kommt, wenn ihr versucht, 
+        ein statisch unbestimmtes System zu berechnen. In der \textbf{TM1} habt ihr dann etwas falsch eingegeben.
   \item Im Zahlenmodus dürfen Lasten von $x$ abhängen (z.\,B.\ \code{x\^{}2} oder \code{2*x+1}),
         $x$ läuft dabei vom Stabanfang aus. Im symbolischen Modus geht das nicht
         (Abschnitt~\ref{sec:symbolisch}).
   \item \textbf{Lasten auf Bögen} gehen in die Rechnung ein. $q$ wirkt quer zum Bogen, also
-        radial, $n$ tangential. Trapezlasten laufen linear über die Bogenlänge, $p_X$ und $p_Y$
+        radial, $n$ tangential. Positiv zeigt $q$ wie beim geraden Stab zur gestrichelten Faser,
+        bei $R > 0$ also zum Mittelpunkt hin, bei $R < 0$ nach außen. $n$ zeigt vom Stabanfang zum
+        Stabende. Trapezlasten laufen linear über die Bogenlänge, $p_X$ und $p_Y$
         wirken in ihrer globalen Richtung (projiziert je Grundriss- bzw.\ Höhenlänge), dazu $m$ und
-        Temperatur. Eigengewicht ist $p_Y = g$ je Bogenlänge. In einer Lastfunktion ist $x$ auf dem
+        Temperatur. Eigengewicht ist $p_Y = g$ je Bogenlänge. Eine konstante radiale Last $q$ hat
+        auf dem Bogen dieselbe Resultierende wie auf der Sehne, nämlich $q$ mal Sehnenlänge
+        senkrecht zur Sehne. Der Bogen ist zwar länger, aber $q$ zeigt überall zum Mittelpunkt, und
+        die Anteile längs der Sehne heben sich auf (wie beim Wasserdruck auf eine gekrümmte Wand).
+        Anders beim Eigengewicht: Das zeigt überall nach unten, die Teile heben sich nicht auf, die
+        Resultierende ist $g$ mal Bogenlänge. Solche Lasten gebt ihr als $p_Y$ ohne Projektion ein. In
+        einer Lastfunktion ist $x$ auf dem
         Bogen der \textbf{Winkel ab Stabanfang im Winkelmodus des Rechners}, also dasselbe wie $p$
         bei \code{M\_bogen1(p)}. Eine radiale Last $2\cos\varphi$ gebt ihr als \code{2*cos(x)} ein,
         das stimmt in DEG und RAD. Ein Polynom wie \code{x/90} hängt dagegen vom Modus ab (DEG:
         $x$ von 0 bis 90). Mit Bögen nur Zahlen, ein Symbol wie \code{q} schaltet den symbolischen
         Modus ein, und der kann keine Bögen.
   \item Gerechnet wird der Bogen als Kette gerader Teilstäbe (Obermenü Seite~3, Segmente für
-        Bögen, Standard 20). Konstante radiale Lasten sind damit exakt, Eigengewicht und tangentiale
-        Lasten bis auf etwa 0,1\,\% (Einspannmoment eines Viertelkreises unter Eigengewicht bei 20
-        Segmenten um 0,04\,\% zu groß). Braucht ihr mehr Stellen, stellt mehr Segmente ein.
+        Bögen, Standard 20). Bei statisch bestimmten Systemen sind konstante radiale Lasten damit
+        exakt, weil jeder Teilstab genau die Resultierende seines Bogenstücks trägt und die Kräfte
+        dort nur aus dem Gleichgewicht folgen (Abschnitt~\ref{sec:mathe-bogen}). Eigengewicht und
+        tangentiale Lasten stimmen bis auf etwa 0,1\,\% (Einspannmoment eines Viertelkreises unter
+        Eigengewicht bei 20 Segmenten um 0,04\,\% zu groß), ebenso statisch unbestimmte Bögen, weil der
+        Linienzug etwas anders steif ist als der Bogen. Braucht ihr mehr Stellen, stellt mehr Segmente
+        ein.
+  \item Die Schnittgrößen am Bogen haben dieselben Vorzeichen wie am geraden Stab, nur ist die
+        Stabachse jetzt die Tangente: $N$ wirkt tangential, $Q$ radial. Wie das Programm Bögen
+        rechnet und woher die Formeln von \code{M\_bogen1(p)} kommen, steht in
+        Abschnitt~\ref{sec:mathe-bogen}.
 \end{itemize}
 
 \taste{f} dreht den Stab unter dem Zeiger um: Anfang und Ende tauschen, alles andere bleibt so, wie
@@ -368,10 +457,15 @@ Seite~1 in ihrer wirklichen Richtung, auf Seite~2 alle als Zug. Das ist genau da
 Knotenschnittverfahren, und der Export \emph{LGS-Matrix} schreibt dazu die Knotengleichgewichte mit
 den Stabkräften \code{S\_i} (Zug positiv) heraus (Abschnitt~\ref{sec:lgs-matrix}).
 
+Ritterschnitt und K-Schnitt rechnet das Programm nicht. Die Fachwerke, an denen sie in der Klausur
+drankommen, sind meist groß, das Eingeben lohnt sich kaum, und die Schnittführung ist ohnehin
+vorgegeben. Zum Vergleich mit eurem Ritterschnitt nehmt die Stabkräfte von Seite~1 der
+Explosionsansicht.
+
 \subsection{Systeme speichern und öffnen}\label{sec:system-speichern}
 
 Das Programm bietet die Möglichkeit, Systeme zu speichern. Im Obermenü (\taste{o})
-stehen auf Seite 4 ganz unten zwei Zeilen:
+stehen auf Seite~3 ganz oben zwei Zeilen:
 
 \begin{itemize}
   \item \emph{System speichern als:} \taste{Enter}, eine Nummer eintippen (z.\,B.\ \code{3}),
@@ -411,8 +505,9 @@ Knoten ab:
 \[
   n = r + 3s - 3k - g
 \]
-mit $r$ Lagerreaktionen (Federn zählen mit), $s$ Stäben, $k$ Knoten und $g$ gelösten Bindungen:
-jedes Stabendgelenk (M, N oder Q) zählt eine, ein Vollgelenk mit $m$ Stäben $m-1$. Geht ihr mit dem
+mit $r$ Lagerreaktionen (Federn zählen mit), $s$ Stäben, $k$ Knoten und $g$ gelösten Bindungen. 
+Das ist zwar nicht genau die Abzählformel aus \textbf{TM1} aber robuster zu programmieren.
+Jedes Stabendgelenk (M, N oder Q) zählt eine, ein Vollgelenk mit $m$ Stäben $m-1$. Geht ihr mit dem
 Zeiger darüber, zeigt das Programm nach der Berechnung dieselbe Zahl in der Form aus \textbf{TM1},
 $n = r + z - 3p$ mit $p$ Scheiben (dort zählen bei $r$ nur die Lager). Im Fachwerkmodus steht dort
 stattdessen die Fachwerkformel $n = s + r - 2k$.
@@ -422,8 +517,9 @@ jedem \taste{b} ein statisch bestimmtes Hauptsystem und zählt, wie viele Bindun
 lösen musste. Das Abzählkriterium ist nur notwendig, nicht hinreichend. Weichen die beiden Zahlen
 voneinander ab, lohnt sich also ein zweiter Blick auf das System. Die Klammer schaltet ihr im
 Obermenü mit \emph{Anzeige N} ein und aus. Bei sehr großen Systemen kostet die Suche nach dem
-Hauptsystem viel Zeit, weil das Programm dafür das System immer wieder neu zerlegt. Braucht ihr die
-Zahl nicht, schaltet \emph{Anzeige N} dann einfach aus.
+Hauptsystem viel Zeit, weil das Programm dafür das System immer wieder neu zerlegt. Dauert die
+Berechnung zu lange, schaltet \emph{Anzeige N} dann einfach aus (Nur bei hochgradig statisch unbestimmten 
+Systemen evtl. ein Problem).
 
 Danach stehen euch diese Ansichten zur Verfügung:
 
@@ -443,41 +539,52 @@ Danach stehen euch diese Ansichten zur Verfügung:
   \taste{v} & Kinematik bzw.\ Verschiebungszustand (PvV) \\
   \taste{p} & Polplan \\
   \taste{l} & Gleichgewichtsbedingungen der Teilsysteme anzeigen, dieselben wie im Export
-              \emph{LGS-Matrix} (Pfeiltasten scrollen) \\
+              \emph{LGS-Matrix}, darunter der Lösungsweg (Pfeiltasten scrollen) \\
   \bottomrule
 \end{longtable}
 
 Für \textbf{TM1} sind die Verläufe $N$, $Q$ und $M$, die Explosionszeichnung
-(Abschnitt~\ref{sec:Explosionszeichnung}) und für das PvV der Polplan und der Verschiebungszustand
-(Abschnitt~\ref{sec:pvv})
-die Hauptsache.\\
+(Abschnitt~\ref{sec:Explosionszeichnung}), das PvV mit Polplan und Verschiebungszustand
+(Abschnitt~\ref{sec:pvv}) und die Ansicht \taste{l} mit LGS und Lösungsweg die Hauptsache.\\
 Für \textbf{TM2} kommen Biegelinie $w$ und Längsverformung $u$ dazu.
 
-Im Obermenü (\taste{o}) stellt ihr das Programm ein. Es hat vier Seiten:
+Im Obermenü (\taste{o}) stellt ihr das Programm ein. Es hat fünf Seiten, mit
+\taste{$\leftarrow$}/\taste{$\rightarrow$} blättert ihr, \taste{Enter} schaltet eine Zeile um oder
+startet die Eingabe:
 
 \begin{longtable}{>{\raggedright\arraybackslash}p{0.16\linewidth}>{\raggedright\arraybackslash}p{0.78\linewidth}}
   \toprule
   \textbf{Seite} & \textbf{Zeilen} \\
   \midrule \endhead
-  1 Einstellungen & \emph{Raster} (Rasterabstand in m); \emph{Alle EA setzen}, \emph{Alle EI
-    setzen} (gilt für alle vorhandenen und alle neuen Stäbe, auch symbolisch); \emph{Starr-Modus:
-    Aktivieren} (setzt $EA$ und $EI$ aller Stäbe auf $10^8$, Abschnitt~\ref{sec:starr});
-    \emph{Auto-KGV} (Abschnitt~\ref{sec:kgv}); \emph{Anzeige N} (Grad der Unbestimmtheit aus dem
-    Auto-KGV-Löser in Klammern oben rechts, siehe oben; kostet bei großen Systemen Rechenzeit); \emph{Schnittgrößen-Modus} (\emph{Hover}
-    zeigt den Wert unter dem Zeiger, \emph{Start\&End} die Stabendwerte);
-    \emph{Fachwerk-Modus} (Abschnitt~\ref{sec:fachwerk}) \\
+  1 Einstellungen & \emph{Raster} (Rasterabstand in m). \emph{Alle EI setzen}, \emph{Alle EA
+    setzen} (gilt für alle vorhandenen und alle neuen Stäbe, auch symbolisch). \emph{Starr-Modus:
+    Aktivieren} (setzt $EA$ und $EI$ aller Stäbe auf $10^8$, Abschnitt~\ref{sec:starr}).
+    \emph{Auto-KGV} (Abschnitt~\ref{sec:kgv}). \emph{Fachwerk-Modus}
+    (Abschnitt~\ref{sec:fachwerk}). \emph{Standard-EA dehnstarr} (Abschnitt~\ref{sec:starr}) \\
   2 Exporte & alle Exporte ins CAS (Abschnitt~\ref{sec:export}) \\
-  3 Darstellung & Toleranz beim Erraten von Brüchen ($10^{-x}$, nur für den letzten Versuch,
-    siehe unten); Punkte pro Stab für die
-    Verläufe; Zoomschritt normal und in der Explosionsansicht; Bemaßung an/aus; Segmente für
-    Bögen; Zahlenformat (Wurzelbrüche, nur Brüche, Dezimal); Maximalwerte an/aus; Rasterpunkte
-    (keine, normal, dick: auf manchen Displays sieht man die normalen Punkte kaum) \\
-  4 Weiteres & Polstrahlen zeichnen (keine, notwendige, alle); Skalierung der Verläufe;
-    \emph{Standard-EA dehnstarr} und \emph{Starre Stäbe (Export)} (Abschnitt~\ref{sec:starr});
-    System speichern und öffnen (Abschnitt~\ref{sec:system-speichern}); \emph{Variablen löschen}:
-    löscht nach einem zweiten \taste{Enter} alle Variablen, die das Skript angelegt hat (Exporte
-    wie \code{wneu1}, \code{randbed}, \code{lgs}, \code{ux\_k1}, Matrizen, Hilfsvariablen).
-    Gespeicherte Systeme \code{system<Nr>} und eure eigenen Variablen bleiben \\
+  3 System und Rechnung & \emph{System speichern als}, \emph{System öffnen}
+    (Abschnitt~\ref{sec:system-speichern}). \emph{Variablen löschen}: löscht nach einem zweiten
+    \taste{Enter} alle Variablen, die das Skript angelegt hat (Exporte wie \code{wneu1},
+    \code{randbed}, \code{lgs}, \code{ux\_k1}, Matrizen, Hilfsvariablen), gespeicherte Systeme
+    \code{system<Nr>} und eure eigenen Variablen bleiben. \emph{CAS Bruch-Tol.} (Toleranz beim
+    Erraten von Brüchen, $10^{-x}$, nur für den letzten Versuch, siehe unten). \emph{Bogen-Segmente}
+    (Teilstäbe je Bogen). \emph{Starre Stäbe (Export)} (Abschnitt~\ref{sec:starr}). \emph{Anzeige N}
+    (Grad der Unbestimmtheit aus dem Auto-KGV-Löser in Klammern oben rechts, siehe oben, kostet bei
+    großen Systemen Rechenzeit). \emph{LGS wie Lösungsweg} und \emph{Max. Teilgruppen}
+    (Abschnitt~\ref{sec:lgs-weg}) \\
+  4 Ergebnisse & \emph{Zahlen-Format} (Wurzelbrüche, nur Brüche, Dezimal). \emph{Schnittgrößen
+    Modus} (\emph{Hover} zeigt den Wert unter dem Zeiger, \emph{Start\&End} die Stabendwerte).
+    \emph{Punkte/Stab} für die Verläufe. \emph{Maximalwerte} an/aus. \emph{Rasterpunkte} (keine,
+    normal, dick: auf manchen Displays sieht man die normalen Punkte kaum. Liegen die Punkte weniger
+    als 5 Pixel auseinander, blendet das Programm sie aus, sonst wäre der Bildschirm grau und der
+    Rechner käme kaum hinterher). \emph{Verlauf-Skalierung}. \emph{Polstrahlen zeichnen} (keine,
+    notwendige, alle) \\
+  5 Ansicht & \emph{Schriftgröße}: jedes \taste{Enter} schaltet weiter (Normal, Groß, Sehr groß,
+    Riesig, also das 1-, 1{,}25-, 1{,}5- bzw.\ 2-fache). Das gilt für die Ansicht \taste{l} mit LGS
+    und Lösungsweg, die gelbe Box und alle Beschriftungen in der Zeichnung, die Zeilenabstände
+    wachsen mit. Die Kopfzeile (\emph{Modus}, $n$), die Menüs und die roten Warnkästen bleiben so
+    groß, wie sie sind. In den Menüs stehen die Spalten fest. Die Einstellung merkt sich das
+    Dokument, wenn ihr es speichert. \emph{Zoom-Schritt} normal und in der Explosionsansicht. \emph{Bemaßung} an/aus \\
   \bottomrule
 \end{longtable}
 
@@ -488,7 +595,10 @@ Dabei versucht es der Reihe nach einen exakten Bruch, bei \emph{Wurzelbrüche} d
 Bruchs und erst zum Schluss einen Bruch mit kleinem Nenner (höchstens 100), der nur bis auf die
 eingestellte \emph{CAS Bruch-Toleranz} $10^{-x}$ stimmen muss. Nur bei diesem letzten Versuch wirkt
 die Toleranz, und trotz des Namens rechnet dabei nicht das CAS. Im Format \emph{Dezimal} spielt sie
-keine Rolle.
+keine Rolle. Sie wirkt überall, wo das Programm eine Zahl als Text schreibt: Beschriftungen,
+Exporte (z.\,B.\ \code{N\_stab1}, \code{v\_EI\_stab1}, LGS, Arbeitssatz) und die Zahlenfaktoren im
+symbolischen Modus. Ein größeres $x$ ist strenger: Ab etwa $x = 12$ bildet das Programm praktisch
+keine Näherungsbrüche mehr, dann steht dort die Dezimalzahl.
 Verwendet die Option für Wurzelbrüche und Brüche also nur, wenn ihr euch zutraut, selber zu erkennen, ob der ausgegebene Bruch stimmen könnte.
 Wenn die Zahlen riesig werden, fängt es wegen dieser Funktion manchmal an, etwas zu hängen.
 Dann solltet ihr ausprobieren, die Einstellung einfach auf Dezimal zu stellen. Genaueres dazu in Abschnitt~\ref{sec:mathe-symbolisch}.
@@ -504,8 +614,8 @@ Wenn ihr mit der Maus über einen Stab geht, werden im \emph{Start\&End}-Modus n
 
 Im Modus \emph{Hover} könnt ihr euch Werte merken: Ein Klick auf einen Stab in der $N$-, $Q$- oder
 $M$-Ansicht setzt dort eine Marke, an der der Wert stehen bleibt (beim Bogen mit der Bogenlänge
-$s$). So vergleicht ihr mehrere Stellen, ohne mit der Maus hin und her zu fahren. Die Marken
-verschwinden erst, wenn ihr den Stab oder alles löscht.
+$s$). Die Marken verschwinden erst, wenn ihr den Stab oder alles löscht.\\
+Im \emph{Hover} Modus wird zudem der Wert direkt unter der Maus angezeigt.
 
 Die Maximalwerte der Biegelinie $w$ und der Längsverformung $u$ stehen in Millimetern.
 Fast waagerechte Linien sehen auf dem Rechner etwas treppig aus: Der Bildschirm zeichnet Linien
@@ -558,7 +668,7 @@ Dann ist es sinnvoll, entweder das System in der jeweiligen Reihenfolge einzugeb
 \textbf{Streckenlasten stehen dort als Resultierende:} Statt der Lastfläche seht ihr einen Pfeil
 auf der Wirkungslinie, beschriftet mit $R = \dots$, und die Lage hängt in der Maßkette unter dem
 System. Den Hebelarm könnt ihr also direkt ablesen. Das gilt für die Querlast $q$, die Längslast
-$n$ und die globalen Linienlasten $p_X$, $p_Y$; ein Streckenmoment $m$ wird zu einem Moment
+$n$ und die globalen Linienlasten $p_X$, $p_Y$. Ein Streckenmoment $m$ wird zu einem Moment
 $M = m\,l$ in Stabmitte. Bei einer Dreieckslast sitzt der Pfeil, wo er hingehört, nämlich bei
 $x_R = S/R$ vom Stabanfang aus, und bei einer Lastfunktion wie \code{x\^{}2} rechnet das
 Programm $R$ und die Lage aus der Lastfunktion selbst.
@@ -567,7 +677,7 @@ Programm $R$ und die Lage aus der Lastfunktion selbst.
 Ähnlich wie bei den Diagrammen zu Schnittgrößen wird, wenn man mit der Maus über ein Teilsystem \emph{hovert},
 nur dieses Teilsystem eingeblendet. Zudem wird dann auch der Punkt angezeigt, um den das Programm die Momentensumme für das jeweilige Teilsystem bildet.
 Mit der Standard-Zoomeinstellung ist die Ansicht oft überfüllt. Um das Navigieren etwas zu erleichtern, ist der Zoom in dieser Ansicht aggressiver eingestellt.
-Das lässt sich im Obermenü (Seite~3) aber auch manuell einstellen.
+Das lässt sich im Obermenü (Seite~5, \emph{Zoom-Schritt Expl.}) aber auch manuell einstellen.
 
 \subsection{Prinzip der virtuellen Verrückung (PvV)}\label{sec:pvv}
 
@@ -595,9 +705,10 @@ benutzen dieselben Namen und dieselben Werte:
         \code{$\delta$\_H}, \code{$\delta$\_V} am gelösten Lager, \code{$\delta$\_G} bzw.
         \code{$\varphi$\_G} am gelösten Gelenk.
   \item Die Drehbögen der Scheiben heißen \code{$\varphi$\_1 = -2*$\varphi$\_0} usw., die
-        Bezugsscheibe \code{$\varphi$\_3 = $\varphi$\_0}; eine Scheibe, die sich nur verschiebt,
+        Bezugsscheibe \code{$\varphi$\_3 = $\varphi$\_0}. Eine Scheibe, die sich nur verschiebt,
         \code{$\delta$\_2 = \dots}.
-  \item Das Menü eines Knotens oder Stabes (Klick darauf) listet seine Wege, die Drehwinkel der
+  \item Das Menü eines Knotens oder Stabes (Zeiger darauf, \taste{Enter}, wie beim normalen
+        Menü) listet seine Wege, die Drehwinkel der
         beteiligten Scheiben und seine Arbeitsanteile, also die Terme, die er zu \code{w\_eq1}
         beiträgt. Das gelöste Einspannmoment heißt auch im Bild \code{M\_A}.
 \end{itemize}
@@ -608,7 +719,7 @@ Handrechnung stimmt.
 
 Im Polplan heißen die Hauptpole \emph{HP1}, \emph{HP2}, \dots\ (Pol einer Scheibe gegenüber dem
 Boden), die Nebenpole \emph{(i,j)} und die Polstrahlen \emph{g(\dots)}, beschriftet mit den Polen,
-die auf ihnen liegen müssen. An den Stäben steht ihre Scheibe \emph{S1}, \emph{S2}, \dots;
+die auf ihnen liegen müssen. An den Stäben steht ihre Scheibe \emph{S1}, \emph{S2}, \dots.
 \emph{S i (FEST)} heißt, die Scheibe ist unverschieblich. Welche Polstrahlen gezeichnet werden
 (keine, nur die notwendigen oder alle), stellt ihr im Obermenü auf Seite~4 ein.
 
@@ -628,7 +739,7 @@ den Einheitszuständen $X_i = 1$ um und könnt euch dabei jedes Mal die komplett
 
 Gelöst wird in dieser Reihenfolge: Einspannmomente, Lagerkräfte, Momentengelenke und zuletzt
 unbelastete Pendelstäbe. Der Export \emph{KGV-Daten} liefert $\delta_{ij}$ (\code{kgv\_delta}) und
-$\delta_{i0}$ (\code{kgv\_delta0}); daraus folgt auf dem Rechner
+$\delta_{i0}$ (\code{kgv\_delta0}). Daraus folgt auf dem Rechner
 $\underline{X} = -\delta^{-1}\,\delta_0$.
 
 \textbf{Wichtig bei gelösten Pendelstäben:} Der Stab ist im Hauptsystem entfernt, die
@@ -640,7 +751,7 @@ liefern keinen Beitrag, und bei gelösten Lagern oder eingefügten Gelenken entf
 weil der Stab dort im System bleibt.
 
 Mein Tipp für die Klausur: Das Hauptsystem, das ihr von Hand wählt, ist oft ein anderes als das
-des Programms. Die Endergebnisse (Schnittgrößen, Lagerkräfte) stimmen trotzdem überein; die
+des Programms. Die Endergebnisse (Schnittgrößen, Lagerkräfte) stimmen trotzdem überein. Die
 einzelnen $\delta_{ij}$ könnt ihr nur vergleichen, wenn ihr dieselben Bindungen gelöst habt. Wie
 das Programm das Hauptsystem wählt und die $\delta$-Zahlen berechnet, steht in
 Abschnitt~\ref{sec:mathe-kgv}.
@@ -656,7 +767,7 @@ Jeder Stab hat ein $EA$ und ein $EI$. Ab Werk sind das $EA = 10^{10}$ und $EI = 
 Wie oben bereits erwähnt, solltet ihr in der \textbf{TM1} nicht an diesen Werten rumspielen. Für statisch bestimmte Systeme sind die Schnittgrößen
 unabhängig davon, wie weich oder starr die Stäbe sind, man bekommt also, egal was eingegeben wird, die richtigen Schnittgrößen. Jedoch erscheint die Warnung \emph{Starrmodus \&
 statisch unbestimmt} nur, wenn bei allen Stäben $EA$ und $EI$ mindestens $10^7$ sind (also z.\,B.\ mit den Werten ab Werk).\\
-Im Obermenü Seite~1 setzt ihr beide Werte für alle Stäbe auf einmal (\emph{Alle EA setzen}, \emph{Alle EI setzen}); der Wert gilt dann auch für Stäbe, die
+Im Obermenü Seite~1 setzt ihr beide Werte für alle Stäbe auf einmal (\emph{Alle EA setzen}, \emph{Alle EI setzen}). Der Wert gilt dann auch für Stäbe, die
 ihr danach noch zeichnet, und er darf symbolisch sein (\code{EA}, \code{EI}).
 
 Der restliche Teil dieses Abschnitts ist für \textbf{TM1} irrelevant.
@@ -675,24 +786,24 @@ große Ersatzsteifigkeit wird bewusst \emph{nicht} verwendet, weil das neben wei
 und Zahlenmüll führt. Wie genau das Programm das macht, steht in Abschnitt~\ref{sec:mathe-starr}.
 
 Für \textbf{TM2} ist gerade bei Biegelinienaufgaben typisch, dass $EA \to \infty$ für alle Stäbe gelten soll.
-Genau dafür sind die Schalter da; für alle Stäbe auf einmal gibt es \emph{Standard-EA dehnstarr} (siehe unten). In \textbf{Statik} steht beim KGV oft, dass
+Genau dafür sind die Schalter da. Für alle Stäbe auf einmal gibt es \emph{Standard-EA dehnstarr} (siehe unten). In \textbf{Statik} steht beim KGV oft, dass
 Normalkraftverformungen vernachlässigt werden, das ist genau \emph{Standard-EA dehnstarr}
-(Obermenü Seite 4), dann stecken in den $\delta$-Zahlen nur die Biegeanteile.
+(Obermenü Seite~1), dann stecken in den $\delta$-Zahlen nur die Biegeanteile.
 
 Halten sich starre Stäbe \emph{gegenseitig} statisch unbestimmt (zwei dehnstarre Stäbe
 hintereinander zwischen zwei Festlagern zum Beispiel), sagt das Gleichgewicht nicht, wie sie sich
 die Kraft teilen. Das Programm rechnet dann so, als wären alle starren Stäbe gleich steif, genau
 wie im Rand-LGS-Export, und sagt euch das in einer gelben Box.
 
-Zusätzlich gibt es im Obermenü Seite 4 den Schalter \emph{Standard-EA dehnstarr} (ab Werk aus).
+Zusätzlich gibt es im Obermenü Seite~1 den Schalter \emph{Standard-EA dehnstarr} (ab Werk aus).
 Damit gelten alle Stäbe als dehnsteif, bei denen ihr im Stabmenü kein eigenes $EA$ eingetragen
 habt. Das ist praktisch, wenn in der Aufgabe steht \enquote{alle Stäbe dehnstarr, nur Stab 3 mit
 $EA$}: Schalter an, und Stab 3 bekommt sein $EA$ im Stabmenü. Ein symbolisches $EA$ bleibt immer
 dehnbar.
 
-Der Schalter \emph{Starre Stäbe (Export)} (ebenfalls Seite~4) wählt das Verfahren für den
+Der Schalter \emph{Starre Stäbe (Export)} (Obermenü Seite~3) wählt das Verfahren für den
 Rand-LGS-Export: \emph{direkt} (Standard, schneller) oder \emph{Grenzwert}. Beide liefern
-dieselben Verschiebungen \code{wv} und \code{uv}; was bei starren Stäben in \code{wneu} und
+dieselben Verschiebungen \code{wv} und \code{uv}. Was bei starren Stäben in \code{wneu} und
 \code{uneu} steht, unterscheidet sich aber (Abschnitt~\ref{sec:randlgs}). Halten sich starre Teile
 gegenseitig statisch unbestimmt, wechselt das Programm von selbst auf den Grenzwert.
 
@@ -714,8 +825,9 @@ Es ergeben sich zwei Anteile:
   \kappa_T &= \alpha_T \,\frac{T_{unten} - T_{oben}}{h} && \text{(Temperaturunterschied, Krümmung)}
 \end{align*}
 
-Die Temperaturdehnung selbst erzeugt keine Kraft. Kräfte entstehen nur aus dem Teil der Verformung,
-der darüber hinausgeht:
+Eine Temperaturdehnung, die sich frei einstellen kann, erzeugt keine Kraft. Kräfte entstehen nur,
+wenn sie behindert wird, und zwar aus dem Unterschied zwischen der wirklichen Verformung und der
+Temperaturverformung:
 \[
   N = EA\,\bigl(u' - \varepsilon_T\bigr), \qquad M = -EI\,\bigl(w'' + \kappa_T\bigr) .
 \]
@@ -729,7 +841,8 @@ wirkt nur $\Delta T/2$. Darauf weist euch eine gelbe Box hin.
 
 Temperatur darf auch symbolisch sein (\code{dt}, \code{t1}, \code{a}). Die für die Temperatur passende Variable \code{T}
 ist aber intern bereits belegt und kann aus diesem Grund nicht eingegeben werden.
-Mit einem symbolischen $\Delta T$ könnt ihr genau die Klausurfrage beantworten, bei der ein $\Delta T$ gesucht ist: erst symbolisch rechnen, dann im
+Mit einem symbolischen $\Delta T$ könnt ihr genau die Klausurfrage beantworten, bei der ein $\Delta T$ gesucht ist: erst symbolisch rechnen,
+bzw. mit den \emph{neuen} Biege und Längslinien (siehe unten), dann im
 CAS nach \code{dt} auflösen (Abschnitt~\ref{sec:export}, Bsp.~\ref{ex:Pendelstabannahme}).
 
 \subsection{Symbolischer Modus}\label{sec:symbolisch}
@@ -745,18 +858,23 @@ Es gibt aber ein paar Besonderheiten um die Ausgabe hinterher richtig interpreti
         Ihr könnt ein System also ganz normal zeichnen und bekommt trotzdem eine symbolische
         Lösung.
   \item \textbf{Diagramme} werden symbolisch beschriftet. Die Zahlenfaktoren folgen dem
-        Zahlenformat aus dem Obermenü (Seite~3): exakter Bruch, sonst (bei \emph{Wurzel/Bruch})
+        Zahlenformat aus dem Obermenü (Seite~4): exakter Bruch, sonst (bei \emph{Wurzel/Bruch})
         die Wurzel eines Bruchs, sonst eine Dezimalzahl. Eine 45°-Diagonale im Fachwerk steht
         damit als \code{50*sqrt(2)} da und nicht als Zufallsbruch. Schaltet ihr das Format um,
-        wird neu gerechnet.
-  \item \textbf{Exporte} (Abschnitt~\ref{sec:export}) sind vollständig symbolisch.
+        wird neu gerechnet.\\
+        Symbolische Temperaturen sind in den Diagrammen \textbf{nicht} enthalten (Abschnitt \ref{sec:mathe-symbolisch}).
+  \item \textbf{Exporte} (Abschnitt~\ref{sec:export}) sind vollständig symbolisch (sofern sinnvoll).
+  \item Das Programm fasst wie der Taschenrechner zusammen: $EI$ ist ein eigenes Symbol und wird
+        nicht als $E\cdot I$ gewertet. Das ist wichtig bei Aufgaben, in denen z.\,B.\ Biege- und
+        Dehnsteifigkeit nicht direkt, sondern als Vielfache eines Referenzwerts $E$, $I$ oder $A$
+        gegeben sind. Dann schreibt ihr \code{2*E*I} statt \code{2*EI}.
 \end{itemize}
 
-Bei der Form der Ausgegebenen Verläufe ist Vorsicht geboten. Intern rechnet das Programm diese symbolischen Eingaben
-mit einer Einheitseingabe durch. Wenn also als Kraft $F$ eingegeben wird, wird diese Für die Rechnung auf $1$ gesetzt.
-Das Programm rechnet dann für jede einzelne Last das System nur mit dieser Last durch. Das schöne an der linearen Theorie ist,
-dass sich die Gesamtlösung einfach aus der Summer der Teillösugnen zusammensetzt. Das Programm weis aber hinterher nicht, welche
-Lasten wie gewichtet werden sollen. Aus diesem Grund werden in den Diagrammen alle Lasten gleich gewichtet.
+Bei der Form der ausgegebenen Verläufe ist Vorsicht geboten. Intern rechnet das Programm diese symbolischen Eingaben
+mit einer Einheitseingabe durch. Wenn also als Kraft $F$ eingegeben wird, wird diese für die Rechnung auf $1$ gesetzt.
+Das Programm rechnet dann für jede einzelne Last das System nur mit dieser Last durch. Das Schöne an der linearen Theorie ist,
+dass sich die Gesamtlösung einfach aus der Summe der Teillösungen zusammensetzt. Das Programm weiß aber hinterher nicht, welche
+Lasten wie gewichtet werden sollen. Aus diesem Grund werden in den Diagrammen alle Lasten gleich gewichtet (vgl. Bsp. \ref{ex:symbolisch}).
 
 \textbf{Was nicht geht} (rote Box, die Berechnung bricht ab):
 
@@ -780,7 +898,36 @@ kommt nur dann, wenn der Zahlenwert das Ergebnis wirklich beeinflusst, also wenn
 tatsächlich gebogen wird bzw.\ Normalkraft trägt (Abschnitt~\ref{sec:hinweise}). Sauber ist es
 trotzdem, alle Steifigkeiten symbolisch zu machen.
 
-Griechische Buchstaben erkennt der Rechner nicht als Symbol; schreibt \code{a} statt $\alpha$.
+Griechische Buchstaben erkennt der Rechner nicht als Symbol. Schreibt \code{a} statt $\alpha$.
+
+\textbf{Einheitencheck.} Im symbolischen Modus prüft das Programm, ob die Einheiten eurer Eingaben
+zusammenpassen. Jedes Feld hat eine feste Einheit:
+
+\begin{longtable}{p{0.55\linewidth}p{0.39\linewidth}}
+  \toprule
+  \textbf{Feld} & \textbf{Einheit} \\
+  \midrule \endhead
+  Koordinaten, Rastermaß, Höhe $h$ & Länge \\
+  $EI$ & Kraft$\cdot$Länge$^2$ \\
+  $EA$, Knotenlasten $F_x$, $F_y$, Streckenmoment $m$ & Kraft \\
+  Knotenmoment $M$, Drehfeder $c_m$ & Kraft$\cdot$Länge \\
+  $q$, $n$, Trapezlasten, $p_X$, $p_Y$, Federn $c_x$, $c_y$ & Kraft/Länge \\
+  $T_{oben}$, $T_{unten}$ & Temperatur \\
+  $\alpha_T$ & 1/Temperatur \\
+  \bottomrule
+\end{longtable}
+
+Die Symbole bekommen ihre Einheit aus den Feldern, in denen sie stehen: Steht \code{EI} im Feld
+$EI$, ist $EI$ eine Kraft$\cdot$Länge$^2$. Das Längensymbol (\code{l} bzw.\ das Symbol aus der
+Geometrie) ist immer eine Länge. Gebt ihr dann als Feder \code{EI/l\^{}2} ein, hat die Feder die
+Einheit Kraft statt Kraft/Länge, und es kommt ein gelber Hinweis:
+\emph{Einheiten: Knoten 2, Feder cy = EI/l\^{}2 hat die Einheit Kraft, erwartet wird
+Kraft/Laenge.} \code{3*EI/l\^{}3} passt dagegen. Geprüft wird in dieser Reihenfolge: Geometrie,
+Steifigkeiten, Knotenlasten, Stablasten, Federn, Temperatur. Gemeldet wird das Feld, das als erstes
+nicht zu den vorherigen passt. Felder mit reinen Zahlen werden übersprungen, weil ihre Einheit in
+der Zahl steckt. Eigene Symbole (z.\,B.\ \code{c}) sind frei, solange sie nirgends
+widersprüchlich vorkommen. Groß- und Kleinschreibung zählt wie im CAS nicht. Gerechnet wird
+trotzdem, der Hinweis sagt nur, dass vermutlich ein Tippfehler in der Eingabe steckt.
 
 
 \section{Export ins CAS}\label{sec:export}
@@ -788,43 +935,72 @@ Griechische Buchstaben erkennt der Rechner nicht als Symbol; schreibt \code{a} s
 Die Exporte legen euch die Ergebnisse als Variablen ins Dokument, mit denen ihr auf einer
 Calculator-Seite weiterrechnen könnt. Sie stehen im Obermenü (\taste{o}) auf Seite~2, nach jedem
 Export meldet sich eine gelbe Box mit den Namen der Variablen. Am meisten bringen sie in
-\textbf{TM2} (Rand-LGS) und \textbf{Statik} (KGV-Daten, Systemmatrizen). Für \textbf{TM1} sind nur
+\textbf{TM2} (Rand-LGS) und \textbf{Statik} (KGV-Daten, Systemmatrizen). Für \textbf{TM1} sind 
 die LGS-Matrix und der Arbeitssatz (Abschnitt~\ref{sec:arbeitssatz}) und evtl die analytischen Schnittkraftverläufe interessant.
 
 \begin{longtable}{p{0.32\linewidth}p{0.64\linewidth}}
   \toprule
   \textbf{Menüpunkt} & \textbf{Variablen im CAS} \\
   \midrule \endhead
-  Alles exportieren & Systemmatrizen \code{sys\_k}, \code{sys\_f}, \code{sys\_u} und je Stab
-    \code{stab1\_k}, \code{stab1\_p}, \code{stab1\_v} (Steifigkeitsmatrix, Volleinspannkräfte,
-    Verformungen), je Knoten \code{knot1\_pv} \\
+  Alles exportieren & Systemmatrizen \code{sys\_k}, \code{sys\_f}, \code{sys\_u} mit der Legende
+    \code{sys\_dof} und je Stab \code{stab1\_k}, \code{stab1\_p}, \code{stab1\_v} (Steifigkeitsmatrix,
+    Volleinspannkräfte, Verformungen), je Knoten \code{knot1\_pv}. Was genau drinsteht, steht unter
+    der Tabelle \\
   Nur Biegelinien & \code{v\_EI\_stab1(x)}, \code{v\_EI\_stab2(x)}, \dots: $EI\,w(x)$ je Stab aus
     der FEM-Lösung \\
   Nur Längslinien & \code{u\_EA\_stab1(x)}, \dots: $EA\,u(x)$ je Stab \\
   KGV-Daten & \code{kgv\_delta}, \code{kgv\_delta0} (Abschnitt~\ref{sec:kgv}) \\
   Arbeitssatz & \code{w\_eq1}, \code{pvv\_kin}, \code{pvv\_pol}, \code{w\_eq2}, \code{pvvinfo} (nur im PvV-Modus) \\
-  Nur Schnittgrößen & \code{N\_stab1(x)}, \code{Q\_stab1(x)}, \code{M\_stab1(x)}, \dots; bei Bögen
+  Nur Schnittgrößen & \code{N\_stab1(x)}, \code{Q\_stab1(x)}, \code{M\_stab1(x)}, \dots. Bei Bögen
     \code{N\_bogen1(p)}, \code{q\_bogen1(p)}, \code{M\_bogen1(p)} über den Winkel $p$ ab Stabanfang,
     im Winkelmodus des Rechners (DEG: Grad, RAD: Bogenmaß). Bis wohin $p$ läuft, steht in der Meldung,
     z.\,B.\ \emph{Stab 1: p von 0 bis 45 Grad}. Trägt der Bogen Lasten, steckt ihr Anteil als
-    Integral über den Winkel mit drin; die Werte am Bogenanfang kommen aus der Rechnung mit
+    Integral über den Winkel mit drin. Die Werte am Bogenanfang kommen aus der Rechnung mit
     Teilstäben \\
-  LGS-Matrix & \code{ggw\_a}, \code{ggw\_b}, \code{ggw\_x}, \code{ggw\_eqs}, \code{lgs} \\
+  LGS-Matrix & \code{ggw\_a}, \code{ggw\_b}, \code{ggw\_x}, \code{ggw\_eqs}, \code{lgs} (nummeriert),
+    \code{lgs\_weg} (Lösungsweg, Abschnitt~\ref{sec:lgs-weg}) \\
   Neue Biegelinie / Neue Längslinie & Rand-LGS, siehe unten \\
   \bottomrule
 \end{longtable}
 
 Die Nummer hängt ohne Unterstrich am Namen: Für Stab~2 heißt es \code{N\_stab2(x)}, nicht
 \code{N\_stab\_2(x)}. \emph{In TI speichern} im Stab- bzw.\ Knotenmenü exportiert nur diesen einen Stab
-oder Knoten. Bei jedem \taste{b} löscht das Programm die alten Schnittgrößenfunktionen, die
-\code{knot}-Matrizen und die Systemmatrizen, damit nichts Veraltetes stehen bleibt;
+oder Knoten: beim Stab \code{stab}$i$\code{\_k}, \code{\_p}, \code{\_v} und seine Funktionen
+\code{N\_stab}$i$, \code{Q\_stab}$i$, \code{M\_stab}$i$, \code{v\_EI\_stab}$i$, \code{u\_EA\_stab}$i$ (beim
+Bogen \code{N\_bogen}$i$ usw.), beim Knoten \code{knot}$k$\code{\_pv}. Bei jedem \taste{b} löscht das Programm die alten Schnittgrößenfunktionen, die
+\code{knot}-Matrizen und die Systemmatrizen, damit nichts Veraltetes stehen bleibt.
 \code{v\_EI\_stab} und \code{u\_EA\_stab} bleiben dagegen stehen, bis ihr sie neu exportiert.
 
-Für \textbf{Statik} interessant: \emph{Alles exportieren} legt mit \code{sys\_k}, \code{sys\_f} und
-\code{sys\_u} die Steifigkeitsmatrix, den Lastvektor und die Knotenverschiebungen des
-Weggrößenverfahrens ab. Damit könnt ihr eure WGV/FEM-Rechnung kontrollieren. Die Reihenfolge
-der Freiheitsgrade ist dabei die des Programms, nicht unbedingt eure. Wie die Vorzeichen im Vergleich
-zur WGV- und zur FEM-Formelsammlung aussehen, steht in Abschnitt~\ref{sec:wgv-vorzeichen}.
+Für \textbf{Statik} interessant: \emph{Alles exportieren} legt die Daten des
+Weggrößenverfahrens ab, damit könnt ihr eure WGV/FEM-Rechnung Schritt für Schritt kontrollieren:
+
+\begin{longtable}{p{0.20\linewidth}p{0.76\linewidth}}
+  \toprule
+  \textbf{Variable} & \textbf{Inhalt} \\
+  \midrule \endhead
+  \code{sys\_k} & Gesamtsteifigkeitsmatrix $\mathbf K$, nur die freien Freiheitsgrade (gehaltene
+    sind schon gestrichen, also $\mathbf K_{red}$) \\
+  \code{sys\_f} & Lastvektor $\mathbf F$: Knotenlasten plus Knotenersatzlasten der Stablasten, also
+    minus die Volleinspannkräfte \\
+  \code{sys\_u} & Lösung von $\mathbf K\,\mathbf u = \mathbf F$, die Knotenverschiebungen \\
+  \code{sys\_dof} & Legende: welcher Freiheitsgrad in welcher Zeile von \code{sys\_k}, \code{sys\_f}
+    und \code{sys\_u} steht, z.\,B.\ \code{"Knoten 2 u\_x"}, \code{"Knoten 2 phi"} oder
+    \code{"Stab 3 phi\_b"} (eigene Drehung eines Stabendes mit Gelenk, die stehen ganz hinten). Bei
+    gedrehtem Lager zählen \code{u\_x}, \code{u\_y} in Lagerrichtung \\
+  \code{stab}$i$\code{\_k} & $6\times 12$: Spalten 1 bis 6 die Stabsteifigkeitsmatrix $\mathbf k$ im
+    lokalen System, Spalten 7 bis 12 dieselbe global ($\mathbf T^T\mathbf k\,\mathbf T$) \\
+  \code{stab}$i$\code{\_p} & $6\times 2$: Volleinspannkräfte $\mathbf p$, Spalte 1 lokal, Spalte 2 global \\
+  \code{stab}$i$\code{\_v} & $6\times 2$: Stabendverschiebungen $\mathbf v = (u_a, w_a, \varphi_a, u_b,
+    w_b, \varphi_b)$, Spalte 1 lokal, Spalte 2 global. Daraus die Stabendkräfte
+    $\mathbf s = \mathbf k\,\mathbf v + \mathbf p$ (Stabmenü Seite~5) \\
+  \code{knot}$k$\code{\_pv} & $3\times 2$: Zeilen $x$, $y$, $\varphi$. Spalte 1 die eingegebene
+    Knotenlast, Spalte 2 die Knotenverschiebung (0, wenn gehalten) \\
+  \bottomrule
+\end{longtable}
+
+Die Reihenfolge der Freiheitsgrade ist die des Programms, nicht unbedingt eure, dafür gibt es
+\code{sys\_dof}. Wie die Vorzeichen im Vergleich zur WGV- und zur FEM-Formelsammlung aussehen, steht
+in Abschnitt~\ref{sec:wgv-vorzeichen}.
 
 \subsection{LGS-Matrix: Gleichgewichtsbedingungen TM1}\label{sec:lgs-matrix}
 
@@ -833,7 +1009,9 @@ Gedacht ist das für \textbf{TM1}, also für statisch bestimmte Systeme: je Teil
 Kräfte nach rechts ($\rightarrow$), nach oben ($\uparrow$) und die Summe der Momente um den
 Punkt~$P$ (gegen den Uhrzeigersinn positiv), durch den möglichst viele Unbekannte gehen. In
 \code{lgs} stehen die Gleichungen als lesbarer Text, in \code{ggw\_a}, \code{ggw\_b} und
-\code{ggw\_x} dieselben Gleichungen als Matrix, rechte Seite und Unbekanntenvektor.\\
+\code{ggw\_x} dieselben Gleichungen als Matrix, rechte Seite und Unbekanntenvektor. In
+\code{lgs\_weg} steht, in welcher Reihenfolge ihr die Gleichungen von Hand löst
+(Abschnitt~\ref{sec:lgs-weg}).\\
 Mit \code{simult(ggw\_a,ggw\_b)} oder mit \code{ggw\_x = ggw\_a$^{-1}$*ggw\_b} lässt sich die Lösung dieses LGS bestimmen.
 Im symbolischen Modus steht das LGS symbolisch da (\code{F}, \code{q}, \code{l}).
 Im Fachwerkmodus wird nicht mehr das GGW an den Teilsystemen sondern an den Knoten gebildet, also das
@@ -848,20 +1026,178 @@ Ein positives Ergebnis heißt, die Kraft wirkt so, wie ihr Pfeil auf Seite~2 zei
   \textbf{Name} & \textbf{Bedeutung} \\
   \midrule \endhead
   \code{A\_h}, \code{A\_v}, \code{M\_A} & Lagerkräfte und Einspannmoment (Lager werden in ihrer
-    Reihenfolge mit Buchstaben durchnummeriert; Federn zählen als Lager) \\
+    Reihenfolge mit Buchstaben durchnummeriert. Federn zählen als Lager) \\
   \code{Gx\_i}, \code{Gy\_i} & Gelenkkraft am Momentengelenk~$i$, in globalen Komponenten \\
   \code{Gn\_i}, \code{Gq\_i} & bei einem N- oder Q-Gelenk: die Stabkraft längs bzw.\ quer zum Stab \\
   \code{Gm\_i} & das Moment, das ein N- oder Q-Gelenk überträgt \\
-  \code{Gx\_isj} \dots & mehr als zwei Teile am Gelenk: Kräfte des Stabes im Teilsystem~$j$;
-    ohne biegesteifen Rest kommt das Gleichgewicht des Gelenkbolzens (\code{G i}) dazu \\
+  \code{Gx\_isj} \dots & mehr als zwei Teile am Gelenk: Kräfte des Stabes im Teilsystem~$j$.
+    Ohne biegesteifen Rest kommt das Gleichgewicht des Gelenkbolzens (\code{G i}) dazu \\
   \bottomrule
 \end{longtable}
 
 Der Hintergrund: Ein Momentengelenk überträgt $N$ und $Q$, aber kein Moment, deshalb gibt es
 dort zwei Kraftkomponenten. Ein \emph{N-Gelenk} überträgt dagegen $Q$ \emph{und} $M$, ein \emph{Q-Gelenk}
-$N$ und $M$. Das Programm stellt genau diese Größen als Unbekannte ein, und zwar in
-Stabrichtung, sauber ins globale System gedreht. Wenn ihr das LGS löst, kommen damit exakt die
-Zahlen heraus, die auf Seite~1 der Explosionsansicht stehen.
+$N$ und $M$. Das Programm setzt genau diese Größen als Unbekannte an, so wie bei einer
+Handrechnung auch (zumindest so, wie ich es von Hand machen würde). Wenn ihr das LGS löst, kommen
+damit exakt die Zahlen heraus, die auf Seite~1 der Explosionsansicht stehen.
+
+Streckenlasten gehen bei jedem Stab als ihre Resultierende ein, also so, wie ihr es von Hand
+macht: eine Kraft auf ihrer Wirkungslinie (im LGS als Kraft am Stabanfang plus Moment um ihn). Beim
+\textbf{Bogen} setzt das Programm die Resultierende aus den Lasten seiner Teilstäbe zusammen, also
+genau aus dem, was auch die Rechnung benutzt. Die Explosionsansicht zeichnet jede Resultierende auf
+ihrer Wirkungslinie ein (Abschnitt~\ref{sec:Explosionszeichnung}), dort könnt ihr sie mit eurer
+Handrechnung vergleichen.
+
+\subsubsection{\texorpdfstring{Lösungsweg \code{lgs\_weg}}{Lösungsweg lgs\_weg}}\label{sec:lgs-weg}
+
+In \textbf{TM1} sind die Systeme meist so gebaut, dass ihr nicht das ganze LGS auf einmal lösen
+müsst. Ihr hangelt euch durch: eine Gleichung mit nur einer Unbekannten, mit deren Wert die
+nächste, und so weiter. Genau diesen Weg schreibt das Programm in \code{lgs\_weg}. Damit ihr wisst,
+welche Gleichung gemeint ist, sind alle Gleichungen in \code{lgs} durchnummeriert:
+\code{(1) $\rightarrow$ TS 1}, \code{(2) $\uparrow$ TS 1}, \code{(3) $\Sigma$M P1 TS 1}, \dots\
+Die Momentengleichung nennt den Bezugspunkt (hier Knoten~1) und das Teilsystem. Im Fachwerkmodus
+heißen die Gleichungen \code{(1) $\rightarrow$ K1}, \code{(2) $\uparrow$ K1}, \dots\ nach den Knoten.
+
+\code{lgs\_weg} lest ihr von oben nach unten, jede Zeile ist ein Schritt, den ihr so in eure Lösung
+übernehmen könnt. Ein Beispiel ist der Dreigelenkrahmen mit verschieden hohen Lagern, beide
+Hälften belastet:
+
+\begin{center}
+\begin{tabular}{l}
+  \code{(7) $\Sigma$M P1 Ges: -B\_h+6*B\_v = 75/2} \\
+  \code{(7): B\_h = 6*B\_v-75/2} \\
+  \code{(6) mit (7): B\_v = 53/10 kN} \\
+  \code{(7): B\_h = -57/10 kN} \\
+  \code{(8) $\rightarrow$ Ges: A\_h+B\_h = -5} \\
+  \code{(8): A\_h = 7/10 kN} \\
+  \code{(9) $\Sigma$M P3 TS 1: 3*A\_h-3*A\_v = -9} \\
+  \code{(9): A\_v = 37/10 kN} \\
+  \code{Alle Auflagerkraefte bestimmt.} \\
+  \code{(1): Gx\_1 = -57/10 kN} \\
+  \code{(2): Gy\_1 = -23/10 kN}
+\end{tabular}
+\end{center}
+
+\begin{itemize}
+  \item \code{(1): Gx\_1 = -57/10 kN} heißt: In Gleichung~(1) ist nur noch $Gx_1$ unbekannt, alle
+        anderen Größen stehen schon weiter oben. Einsetzen, auflösen, fertig.
+  \item Steht eine Gleichung nicht in \code{lgs}, bekommt sie die nächste freie Nummer und wird
+        einmal ganz ausgeschrieben, hier z.\,B.\ \code{(7) $\Sigma$M P1 Ges}: die Momente am
+        Gesamtsystem um Knoten~1 (Lager $A$). Darunter folgt ihr Ergebnis wie gewohnt.
+  \item Reicht keine Gleichung allein, nimmt das Programm zwei Gleichungen mit denselben zwei
+        neuen Unbekannten, hier (7) und die Momentengleichung~(6) von TS~2 aus \code{lgs}. Die
+        erste steht nach einer Unbekannten aufgelöst da (\code{(7): B\_h = 6*B\_v-75/2}), das
+        schreibt ihr so hin und setzt es in die zweite ein: \code{(6) mit (7): B\_v = 53/10 kN}.
+        Zum Schluss setzt ihr zurück ein: \code{(7): B\_h = -57/10 kN}.
+  \item Bei drei Gleichungen geht es genauso: die erste nach einer Unbekannten auflösen, in die
+        zweite einsetzen und diese nach der nächsten auflösen (\code{(5) mit (3): \dots}), beides
+        in die dritte einsetzen (\code{(8) mit (3), (5): \dots}), dann von hinten zurückeinsetzen.
+        Größere Blöcke kommen nur vor, wenn das System wirklich keinen kürzeren Weg hergibt.
+\end{itemize}
+
+Zur Auswahl stehen außer den Gleichungen aus \code{lgs} auch die, die ihr von Hand nehmen würdet:
+
+\begin{itemize}
+  \item das \textbf{Gesamtsystem} ($\rightarrow$, $\uparrow$ und Momente um jeden Knoten), dort fallen
+        alle Gelenkkräfte heraus. Beim Dreigelenkrahmen mit gleich hohen Lagern liefert
+        \code{$\Sigma$M P1 Ges} direkt die Vertikalkraft am anderen Lager,
+  \item Momente eines Teilsystems um andere Knoten oder um den Schnittpunkt der Wirkungslinien
+        zweier Unbekannter, z.\,B.\ \code{$\Sigma$M S(A\_h,B\_v) Ges},
+  \item die Kräfte quer zu einer schrägen Unbekannten (\code{$\Sigma$F quer zu B\_h TS 2}), damit
+        fällt diese Unbekannte heraus,
+  \item bei Rahmen zusammengefasste Teilsysteme wie \code{TS 1+2},
+  \item bei Rahmen die Achse eines \textbf{Pendelstabs}, siehe unten.
+\end{itemize}
+
+Der Name sagt, woher die Gleichung kommt: erst die Art ($\rightarrow$, $\uparrow$, $\Sigma$M um
+einen Punkt, $\Sigma$F quer zu einer Richtung), dann das Teilsystem bzw.\ die Gruppe. \code{P5}
+ist Knoten~5, \code{S(A\_h,B\_v)} der Schnittpunkt der Wirkungslinien von $A_h$ und $B_v$,
+\code{TS 1+2} die Teilsysteme 1 und 2 zusammen, \code{Ges} das Gesamtsystem. \code{$\Sigma$M P5 TS 1+2} heißt also:
+Momente um Knoten~5 an den Teilsystemen 1 und 2 zusammen. Als Momentenpunkt einer Gruppe nimmt
+das Programm nur Punkte, an denen eine Kraft herausfällt, die nach dem Zusammenfassen noch da ist.
+Das Gelenk zwischen TS~1 und TS~2 ist für \code{TS 1+2} also kein besonderer Punkt mehr, seine
+Gelenkkräfte heben sich ohnehin auf.
+
+\textbf{Pendelstab:} Ein Teilsystem ohne Lasten, das nur an zwei Punkten angeschlossen ist,
+an einem Ende z.\,B.\ an einem gelenkigen Lager, am anderen über ein Momentengelenk (gerade oder
+geknickt, etwa die unbelastete Hälfte eines Dreigelenkrahmens). Die einzigen Kräfte daran sind die
+Lagerkräfte und die Gelenkkräfte. Seine Momentensumme um das Gelenkende enthält deshalb nur die
+beiden Lagerkräfte und sagt: Die Lagerkraft wirkt auf der Verbindungslinie der beiden Punkte, der
+Achse. Diese Achse nimmt das Programm wie eine weitere Wirkungslinie dazu. In einer Momentensumme
+um einen Punkt auf der Achse lassen sich dann beide Lagerkomponenten zugleich mit der
+Pendel-Momentensumme herausrechnen, z.\,B.\ \code{$\Sigma$M S(Pendel TS 2,A\_h) Ges}:
+Momente am Gesamtsystem um den Schnittpunkt der Achse von Teilsystem~2 mit der Wirkungslinie von
+$A_h$. Übrig bleibt nur $A_v$. So hat auch ein Dreigelenkrahmen mit verschieden hohen Lagern einen
+Punkt, der direkt die erste Lagerkraft liefert. Weil in so einer Gleichung die Momentensumme des
+Pendelstabs schon mit drinsteckt, kommt sie erst nach allen anderen Gleichungen mit nur einer
+Unbekannten dran, aber noch vor einem Block.
+
+Bevorzugt werden immer Schritte mit einer Unbekannten, und zwar zuerst Gleichungen aus \code{lgs},
+dann andere Momentenpunkte, dann das Gesamtsystem, dann Zusammenfassungen und Schnittpunkte und
+zuletzt Gleichungen mit einem Pendelstab. Erst wenn so kein Schritt mehr geht, kommt ein Block. Im
+\textbf{Fachwerkmodus} bleibt es beim Knotenschnitt, dazu kommt nur das Gesamtsystem für die
+Lagerkräfte. Einen Ritterschnitt sucht das Programm nicht, in der Klausur ist die Schnittführung
+dafür meist ohnehin vorgegeben.
+
+\textbf{Lagerkräfte zuerst:} In vielen Klausuraufgaben ist nur nach den Lagerkräften gefragt.
+Deshalb holt das Programm sie so früh wie möglich: Gibt es eine Gleichung, die eine Lagerkraft
+allein bestimmt, kommt sie vor jeder Gelenkkraft. Gibt es keine, nimmt es lieber zuerst eine
+Gelenkkraft, und zwar eine, nach der eine Lagerkraft allein bestimmbar wird, als einen Block nur für
+die Lagerkräfte. Einfacher geht also immer vor früher: Ein Block entsteht dafür nie. Nur zwischen
+zwei gleich großen Blöcken gewinnt der mit den Lagerkräften, wie oben (7) und (6) für $B_h$ und
+$B_v$. Sobald alle Lagerkräfte da sind, steht im Weg die Zeile \emph{Alle Auflagerkraefte
+bestimmt.} Ist nur nach den Lagerkräften gefragt, schreibt ihr bis dahin ab.
+
+Gerechnet wird exakt mit dem CAS. Brüche mit sehr großen Zahlen, wie sie aus Dezimaleingaben
+entstehen (z.\,B.\ \code{173903/112548}), zeigt \code{lgs\_weg} als Dezimalzahl, schöne Brüche und
+Wurzeln bleiben stehen. Im symbolischen Modus stehen die Ergebnisse mit euren Symbolen da und ohne
+Einheit. In der Ansicht \taste{l} steht der Lösungsweg grün unter den Gleichungen. Ist das System
+nicht statisch bestimmt, steht in \code{lgs\_weg} nur ein Hinweis. Wie das Programm die
+Reihenfolge sucht, steht in Abschnitt~\ref{sec:mathe-gleichgewicht}.
+
+\textbf{LGS wie Lösungsweg} (Obermenü Seite~3, ab Werk aus): Normalerweise bleibt \code{lgs} die
+Handrechnung zu Seite~2, drei Gleichungen je Teilsystem, und die Gleichungen am Gesamtsystem stehen
+nur im Lösungsweg mit eigener Nummer. Schaltet ihr die Option ein, kommen diese Gleichungen mit in
+\code{lgs} (und \code{ggw\_a}, \code{ggw\_b}): Jede ersetzt eine Gleichung, die der Lösungsweg nicht
+braucht. Der Lösungsweg nennt dann nur noch Nummern aus \code{lgs}. Für den Dreigelenkrahmen von
+oben:
+
+\begin{center}
+\begin{tabular}{ll}
+  \code{lgs} & \code{lgs\_weg} \\
+  \code{(1) $\rightarrow$ TS 1: 1*A\_h+1*Gx\_1=-5} & \code{(3): B\_h = 6*B\_v-75/2} \\
+  \code{(2) $\uparrow$ TS 1: 1*A\_v-1*Gy\_1=6} & \code{(6) mit (3): B\_v = 53/10 kN} \\
+  \code{(3) $\Sigma$M P1 Ges: -1*B\_h+6*B\_v=75/2} & \code{(3): B\_h = -57/10 kN} \\
+  \code{(4) $\rightarrow$ Ges: 1*A\_h+1*B\_h=-5} & \code{(4): A\_h = 7/10 kN} \\
+  \code{(5) $\Sigma$M P3 TS 1: 3*A\_h-3*A\_v=-9} & \code{(5): A\_v = 37/10 kN} \\
+  \code{(6) $\Sigma$M P3 TS 2: 2*B\_h+3*B\_v=9/2} & \dots
+\end{tabular}
+\end{center}
+
+Eindeutig lösbar bleibt das LGS dabei immer: Die Gleichungen des Lösungswegs bestimmen Schritt für
+Schritt jeweils neue Unbekannte, zusammen sind sie also selbst schon ein eindeutig lösbares System.
+Zur Sicherheit prüft das Programm den Rang trotzdem: Verschwindet die Determinante, bleibt \code{lgs}, wie es ist.
+Die Export-Meldung sagt, wie viele Gleichungen ersetzt wurden.
+
+\textbf{Max. Teilgruppen} (Obermenü Seite~3, ab Werk 30): Bei Rahmen fasst das Programm
+benachbarte Teilsysteme zusammen (\code{TS 1+2}, \code{TS 1+2+3}, \dots), die kleinen Gruppen zuerst.
+Bei großen Systemen können das sehr viele werden, und jede Gruppe bringt Gleichungen um alle
+passenden Punkte mit. Diese Zahl begrenzt, wie viele Zusammenfassungen gebildet werden. \code{0}
+heißt keine. Die einzelnen Teilsysteme und das Gesamtsystem zählen nicht mit, einen Lösungsweg gibt
+es also auch mit \code{0}. Er kann dann nur mehr Blöcke brauchen. Rechnet die Ansicht \taste{l} bei
+einem großen System spürbar lange, stellt hier eine kleinere Zahl ein.
+
+\textbf{Gegenprüfung mit dem WGV/FEM:} Ist das System berechnet, vergleicht das Programm die Lösung
+des LGS mit den Werten des WGV/FEM (Seite~1 der Explosionsansicht). Weichen sie um mehr als
+$10^{-4}$ des größten Wertes voneinander ab, steht in der Ansicht \taste{l} rot über den
+Gleichungen und in der Export-Meldung eine Warnung, z.\,B.\ \emph{Achtung: LGS und FEM weichen ab
+bei A\_v (LGS 3.5, FEM 2.5)}. Eigentlich darf das nie passieren. Seht ihr die Warnung, stimmt
+entweder das LGS oder die WGV/FEM Lösung für dieses System nicht, dann rechnet die genannte Größe von Hand nach
+und schickt mir das System. Verglichen wird jede Unbekannte, auch N- und Q-Gelenkgrößen (am
+Bogenende zeigen sie in LGS und FEM gleich, tangential zum Bogen). Im PvV-Modus vergleicht das LGS
+nicht: Dort ist eine Bindung gelöst, das System ist beweglich, und ein Gleichgewichts-LGS hat keine
+eindeutige Lösung. Dafür prüft dort der Export \emph{Arbeitssatz} die freigesetzte Größe gegen die
+FEM (Abschnitt~\ref{sec:arbeitssatz}).
 
 \subsection{\texorpdfstring{Arbeitssatz: \code{w\_eq1}, \code{pvv\_kin}, \code{pvv\_pol}, \code{w\_eq2}}{Arbeitssatz: w\_eq1, pvv\_kin, pvv\_pol, w\_eq2}}\label{sec:arbeitssatz}
 
@@ -881,10 +1217,23 @@ Arbeit hinschreiben, dann die Kinematik aus dem Polplan einsetzen.
     die erste Scheibe $|$ über die zweite. Beide Spalten sind gleich, daraus folgen die
     Verhältnisse der Drehwinkel in \code{pvv\_kin} \\
   \code{w\_eq2} & alles durch $\varphi_0$ der Bezugsscheibe ausgedrückt (verschiebt sich die nur:
-    $\delta_0$); das löst ihr direkt nach der gesuchten Größe auf \\
+    $\delta_0$). Das löst ihr direkt nach der gesuchten Größe auf \\
   \code{pvvinfo} & Legende: was jeder Name bedeutet \\
   \bottomrule
 \end{longtable}
+
+\textbf{Gegenprüfung mit der FEM:} Ist das System vor dem Lösen der Bindung berechnet (\taste{b}),
+löst das Programm \code{w\_eq2} selbst nach der freigesetzten Größe auf und vergleicht sie mit
+dem Wert, den die FEM im ursprünglichen, unverschieblichen System für genau diese Größe hat
+(Lagerkraft, Einspannmoment oder Schnittgröße am Gelenk). Die FEM-Werte stammen ja aus der Rechnung
+vor dem Lösen, das System ist dort noch nicht beweglich. Beide müssen gleich sein, denn der
+Arbeitssatz ist nur eine andere Schreibweise des Gleichgewichts. Weichen sie um mehr als
+$10^{-4}$ des größten Kraft- bzw.\ Momentenwerts im System ab, hängt an die Export-Meldung eine
+Warnung, z.\,B.\ \emph{Achtung: Arbeitssatz und FEM weichen ab bei N (Arbeitssatz -1.98, FEM -5.4)}.
+Dann rechnet die Größe von Hand nach und schickt mir das System. Im symbolischen Modus rechnet der
+Vergleich mit den Platzhalterwerten der FEM. Ohne Warnung zeigt das Programm nichts an, den Wert
+selbst bekommt ihr wie bisher aus \code{w\_eq2}. N- und Q-Gelenke an einem Bogenende wirken wie in
+der FEM tangential zum Bogen, im PvV-Bild, im Polplan und im Arbeitssatz.
 
 Setzt ihr Spalte~3 von \code{pvv\_kin} in \code{w\_eq1} ein, kommt genau \code{w\_eq2} heraus. Ein
 Element holt ihr mit \code{pvv\_kin[2,3]}, die Tabellen sind also nur drei Variablen statt einer je
@@ -898,177 +1247,41 @@ eingegeben ist, die Vorzeichen stecken also alle in der Kinematik:
   \item \code{$\delta$\_k3x}, \code{$\delta$\_k3y}: Knoten~3 in Richtung der x- bzw.\ y-Last (x nach rechts, y nach
         unten, bei gedrehtem Lastsystem mitgedreht).
   \item \code{$\delta$\_s2q}, \code{$\delta$\_s2n}: Angriffspunkt der Resultierenden der Quer- bzw.\ Längslast von
-        Stab~2; \code{$\delta$\_s2x}, \code{$\delta$\_s2y}: dasselbe für die globalen Linienlasten. Dass man eine
+        Stab~2. \code{$\delta$\_s2x}, \code{$\delta$\_s2y}: dasselbe für die globalen Linienlasten. Dass man eine
         Streckenlast durch ihre Resultierende ersetzen darf, ist hier exakt: Eine starre Scheibe
         verschiebt sich linear.
-  \item \code{$\delta$\_H}, \code{$\delta$\_V}: Lagerknoten in Richtung von $H$ bzw.\ $V$; \code{$\varphi$\_G}, \code{$\delta$\_G}:
+  \item Auf einem \textbf{Bogen} fasst der Export alle Bogenlasten zu einer Resultierenden
+        zusammen: \code{$\delta$\_s2x}, \code{$\delta$\_s2y} sind dann die Wege ihres
+        Angriffspunkts in x bzw.\ y. Der Punkt liegt auf ihrer Wirkungslinie, dort wo sie den Bogen
+        schneidet. Aus demselben Grund wie oben ist das exakt: Auf der starren Scheibe leistet die
+        Resultierende dieselbe Arbeit wie die verteilte Last.
+  \item \code{$\delta$\_H}, \code{$\delta$\_V}: Lagerknoten in Richtung von $H$ bzw.\ $V$. \code{$\varphi$\_G}, \code{$\delta$\_G}:
         gegenseitige Verdrehung bzw.\ Verschiebung am gelösten Gelenk.
   \item \code{$\varphi$\_1}, \code{$\varphi$\_2}, \dots: Drehwinkel der Scheiben mit den Nummern aus dem Polplan
         (\code{$\delta$\_2} für eine Scheibe, die sich nur verschiebt).
-  \item \code{$\delta$x\_P12}, \code{$\delta$y\_P12}: Verschiebung des Nebenpols (1,2) in x bzw.\ y;
+  \item \code{$\delta$x\_P12}, \code{$\delta$y\_P12}: Verschiebung des Nebenpols (1,2) in x bzw.\ y.
         \code{$\varphi$\_P12}: Nebenpol im Unendlichen, beide Scheiben drehen gleich.
 \end{itemize}
 
 Lasten auf Scheiben, die sich nicht bewegen, leisten keine Arbeit und tauchen deshalb gar nicht
 auf. Winkel und Momente zählen \emph{gegen den Uhrzeigersinn} positiv. Die
 freigesetzte Größe wirkt so, wie sie im PvV-Bild gezeichnet ist: $H$ nach rechts, $V$ nach unten
-(bei gedrehtem Lager in Lagerrichtung), $M_A$ gegen den Uhrzeigersinn; Gelenkgrößen $M$, $N$, $Q$
+(bei gedrehtem Lager in Lagerrichtung), $M_A$ gegen den Uhrzeigersinn. Gelenkgrößen $M$, $N$, $Q$
 sind positive Schnittgrößen, also mit demselben Vorzeichen wie in euren Verläufen. Im symbolischen
 Modus stehen eure Lastnamen ($F_1$, $F_2$, \dots) und das Längensymbol ($l$ bzw.\ euer Symbol aus
-der Geometrie) in der Gleichung; schräge Lasten kommen als exakte Faktoren wie $\sqrt{2}/2$, der
+der Geometrie) in der Gleichung. Schräge Lasten kommen als exakte Faktoren wie $\sqrt{2}/2$, der
 Winkelmodus des Rechners spielt also keine Rolle.
 
-\subsubsection*{Beispiel: Gelenkkette aus der Klausur}
-
-Gesucht ist das Einspannmoment $M_A$ der Gelenkkette in Abbildung~\ref{fig:pvv-gelenkkette}
-(dasselbe System rechnet auch die Testreihe nach). Die Knoten liegen bei N1~$(0|1)$,
-N2~$(1|0)$, N3~$(2|1)$ und N4~$(3|0)$ in Vielfachen von $l$, mit Gelenken in N1 bis N3. N1 ist
-waagerecht gehalten, N2 senkrecht (Rollenlager), N4 eingespannt. $F_1$ zieht in N1 nach rechts,
-$F_2$ in N2 nach links (eingegeben als x-Last \code{-F2}), $F_3$ greift in N3 unter $45^\circ$ in
-Richtung von Stab~2 an. Im PvV-Modus löst ihr in N4 das Moment, die Einspannung wird zum
-Festlager mit $M_A$.
-
-\begin{figure}[htbp]
-  \centering
-  \begin{tikzpicture}[scale=2.0, >=stealth,
-      stab/.style={line width=1.6pt},
-      gelenk/.style={circle, draw, fill=white, inner sep=1.4pt},
-      pol/.style={circle, fill=red!70!black, inner sep=1.3pt},
-      strahl/.style={red!70!black, dashed, thin},
-      last/.style={->, thick, blue!70!black}]
-    % Polstrahlen
-    \draw[strahl] (-0.35,1) -- (1.35,1);
-    \draw[strahl] (1,-0.35) -- (1,2.25);
-    \draw[strahl] (3.25,-0.25) -- (0.8,2.2);
-    \draw[strahl] (1,1) -- (3.2,-0.1);
-    \draw[strahl] (0.8,-0.2) -- (2.25,1.25);
-    % Staebe
-    \draw[stab] (0,1) -- (1,0) -- (2,1) -- (3,0);
-    % Lager N1: waagerecht gehalten
-    \draw (-0.03,1) -- (-0.2,1.1) -- (-0.2,0.9) -- cycle;
-    \draw (-0.25,0.85) -- (-0.25,1.15);
-    \foreach \y in {0.88,0.96,1.04,1.12} \draw (-0.25,\y) -- (-0.31,\y-0.05);
-    % Lager N2: senkrecht gehalten (Rolle)
-    \draw (1,-0.03) -- (0.9,-0.2) -- (1.1,-0.2) -- cycle;
-    \draw (0.86,-0.25) -- (1.14,-0.25);
-    % Lager N4: Festlager mit geloestem Moment
-    \draw (3,-0.03) -- (2.9,-0.2) -- (3.1,-0.2) -- cycle;
-    \draw (2.85,-0.2) -- (3.15,-0.2);
-    \foreach \x in {2.88,2.96,3.04,3.12} \draw (\x,-0.2) -- (\x-0.05,-0.26);
-    \draw[->, thick, blue!70!black] (3.22,0.12) arc (20:160:0.23);
-    \node[blue!70!black] at (3.38,0.32) {$M_A$};
-    % Gelenke
-    \foreach \p in {(0,1),(1,0),(2,1)} \node[gelenk] at \p {};
-    % Lasten
-    \draw[last] (-0.6,1.22) -- (-0.06,1.22) node[midway, above] {$F_1$};
-    \draw[last] (1.5,0) -- (1.12,0) node[pos=0.1, below] {$F_2$};
-    \draw[last] (2.05,1.05) -- (2.35,1.35) node[right] {$F_3$};
-    % Knotennamen
-    \node at (0.16,1.13) {N1};
-    \node at (0.72,-0.1) {N2};
-    \node at (2,0.78) {N3};
-    \node[right] at (3.14,-0.1) {N4};
-    % Pole
-    \node[pol, label={[red!70!black]above left:{HP1}}] at (1,1) {};
-    \node[pol, label={[red!70!black]left:{HP2}}] at (1,2) {};
-    \node[pol] at (3,0) {};
-    \node[red!70!black] at (2.66,-0.06) {HP3};
-    \node[pol] at (5/3,2/3) {};
-    \node[red!70!black] at (1.57,0.91) {(1,3)};
-    \node[red!70!black] at (1.45,0.12) {(1,2)};
-    \node[red!70!black, above left] at (2,1.03) {(2,3)};
-  \end{tikzpicture}
-  \caption{Gelenkkette im PvV-Modus mit gelöstem Einspannmoment. Rot: Hauptpole HP1, HP2, HP3
-    und die Nebenpole; (1,2) liegt in N2, (2,3) in N3, (1,3) bei $(5/3|2/3)$.}
-  \label{fig:pvv-gelenkkette}
-\end{figure}
-
-\textbf{Polplan.} Scheibe~1 (Stab~1) hat ihren Hauptpol auf der Waagerechten durch N1 und auf der
-Senkrechten durch N2, also in $(1|1)$. Scheibe~3 dreht um N4. Für Scheibe~2 liegt der Hauptpol auf
-der Senkrechten durch N2 (dort liegen HP1 und (1,2)) und auf der Geraden durch N4 und N3 (dort
-liegen HP3 und (2,3)), also in $(1|2)$. Bezugsscheibe ist Scheibe~3, ihr Winkel heißt in
-\code{w\_eq2} $\varphi_0$.
-
-\textbf{\code{w\_eq1}} schreibt nur die Arbeit hin:
-\[
-  (-F_2)\,\delta_{k2x} + F_3\,\delta_{k3x} + M_A\,\varphi_3 = 0 .
-\]
-$F_1$ fehlt, weil N1 sich nur senkrecht bewegen kann. $F_2$ steht mit Minus, weil der Weg
-$\delta_{k2x}$ in Richtung der x-Last zählt (nach rechts) und ihr die Last als \code{-F2}
-eingegeben habt. $M_A$ arbeitet am Drehwinkel von Scheibe~3, an der es angreift.
-
-\textbf{\code{pvv\_kin}} sagt, wie groß jeder Weg ist:
-
-\begin{center}
-  \begin{tabular}{lll}
-    \toprule
-    \textbf{Weg} & \textbf{über die eigene Scheibe} & \textbf{über $\varphi_0$} \\
-    \midrule
-    $\delta_{k2x}$ & $l\,\varphi_1$ & $-2\,l\,\varphi_0$ \\
-    $\delta_{k3x}$ & $\sqrt2\,l\,\varphi_2$ & $-\sqrt2\,l\,\varphi_0$ \\
-    $\varphi_1$ & $\varphi_1$ & $-2\,\varphi_0$ \\
-    $\varphi_2$ & $\varphi_2$ & $-\varphi_0$ \\
-    $\varphi_3$ & $\varphi_3$ & $\varphi_0$ \\
-    \bottomrule
-  \end{tabular}
-\end{center}
-
-Zeile~1: N2 gehört zu Scheibe~1, die um $(1|1)$ dreht. Für eine Bewegung in x zählt der senkrechte
-Abstand zum Pol, hier $l$, also $\delta_{k2x} = l\,\varphi_1$ (dreht die Scheibe gegen den
-Uhrzeigersinn, wandert der Punkt unter dem Pol nach rechts). Zeile~2: N3 dreht mit Scheibe~2 um
-$(1|2)$. Der Fahrstrahl ist $(1,-1)\,l$, die Bewegung $\varphi_2\,(1,1)\,l$ steht senkrecht dazu,
-in Richtung von $F_3$, also $(1,1)/\sqrt2$, projiziert gibt das $\sqrt2\,l\,\varphi_2$. N3 gehört
-als Gelenkknoten auch zu Scheibe~3; das Programm nimmt eine der beiden, Spalte~3 ist in beiden
-Fällen dieselbe. Die drei unteren Zeilen sind die Verhältnisse der Drehwinkel, und die kommen aus
-\code{pvv\_pol}.
-
-\textbf{\code{pvv\_pol}} schreibt für jeden Nebenpol zweier bewegter Scheiben seine Bewegung einmal
-über jede Scheibe hin (in der Richtung, in die er sich hauptsächlich bewegt):
-
-\begin{center}
-  \begin{tabular}{lll}
-    \toprule
-    \textbf{Nebenpol} & \textbf{über die erste Scheibe} & \textbf{über die zweite} \\
-    \midrule
-    $\delta x_{P12}$ & $l\,\varphi_1$ & $2\,l\,\varphi_2$ \\
-    $\delta y_{P13}$ & $-\tfrac23\,l\,\varphi_1$ & $\tfrac43\,l\,\varphi_3$ \\
-    $\delta x_{P23}$ & $l\,\varphi_2$ & $-l\,\varphi_3$ \\
-    \bottomrule
-  \end{tabular}
-\end{center}
-
-Beide Spalten sind gleich, weil der Nebenpol auf beiden Scheiben derselbe Punkt ist. Aus (2,3)
-folgt $\varphi_2 = -\varphi_3 = -\varphi_0$, aus (1,2) $\varphi_1 = 2\,\varphi_2 = -2\,\varphi_0$.
-Die Zeile (1,3) ist die Probe: $-\tfrac23\varphi_1 = \tfrac43\varphi_3$ gibt ebenfalls
-$\varphi_1 = -2\,\varphi_0$. Das ist genau die Rechnung, die ihr im Polplan von Hand macht.
-
-\textbf{\code{w\_eq2}} ist \code{w\_eq1} mit Spalte~3 eingesetzt:
-\[
-  \varphi_0\,\bigl(2\,l\,F_2 - \sqrt2\,l\,F_3 + M_A\bigr) = 0
-  \quad\Rightarrow\quad M_A = \bigl(\sqrt2\,F_3 - 2\,F_2\bigr)\,l .
-\]
-Weil die virtuelle Verdrehung $\varphi_0$ beliebig ist, muss die Klammer null sein.
-
-\textbf{Auf dem Rechner} könnt ihr jeden Schritt selbst nachvollziehen:
-
-\begin{itemize}
-  \item \code{pvv\_kin} und \code{pvv\_pol} anzeigen lassen und mit eurem Polplan vergleichen;
-        ein einzelnes Element holt ihr mit \code{pvv\_kin[2,3]}.
-  \item Selbst einsetzen (auf dem Rechner in einer Zeile):
-        \begin{center}
-          \code{w\_eq1|$\delta$\_k2x=pvv\_kin[1,3] and $\delta$\_k3x=pvv\_kin[2,3]}\\
-          \code{and $\varphi$\_3=pvv\_kin[5,3]}
-        \end{center}
-        liefert dasselbe wie \code{w\_eq2}.
-  \item Auflösen: \code{solve(w\_eq2,M\_A)}. Bietet der Rechner zusätzlich $\varphi_0 = 0$ an,
-        ist das die triviale Lösung ohne Bewegung; sie sagt nichts aus.
-  \item \code{pvvinfo} erklärt jeden Namen, falls ihr nicht mehr wisst, welcher Weg welcher ist.
-\end{itemize}
+Ein ausführlich durchgerechnetes Beispiel (Klausuraufgabe mit Polplan, \code{pvv\_kin}, \code{pvv\_pol}
+und \code{w\_eq2} für zwei Lagerkräfte) steht in Abschnitt~\ref{ex:pvv}.
 
 Die Herleitung der Formeln für Spalte~2 und für die Nebenpole steht in
 Abschnitt~\ref{sec:mathe-arbeitssatz}.
 
-\subsection{\texorpdfstring{Linien aus der FEM-Lösung: \code{v\_EI\_stab}, \code{u\_EA\_stab}}{Linien aus der FEM-Lösung: v\_EI\_stab, u\_EA\_stab}}\label{sec:export-fem}
+
+
+
+\subsection{\texorpdfstring{Linien aus der WGV/FEM-Lösung: \code{v\_EI\_stab}, \code{u\_EA\_stab}}{Linien aus der FEM-Lösung: v\_EI\_stab, u\_EA\_stab}}\label{sec:export-fem}
 
 \emph{Nur Biegelinien} und \emph{Nur Längslinien} sind die älteren Exporte. Sie lösen kein eigenes
 Gleichungssystem, sondern nehmen die Verformungen an beiden Stabenden aus der normalen Berechnung
@@ -1079,10 +1292,16 @@ entstehen bei \emph{Nur Schnittgrößen} die Verläufe \code{N\_stab1(x)}, \code
 
 Der Unterschied zum Rand-LGS: Im Zahlenmodus kommen die Werte aus der numerischen Rechnung und
 werden beim Export wieder als Bruch erraten, sie können also leicht gerundet sein. Im symbolischen
-Modus stammen sie aus der Superposition (Abschnitt~\ref{sec:symbolisch}). Bei starren Stäben
-rechnen diese Exporte mit einer sehr großen Ersatzsteifigkeit statt mit $EI \to \infty$ bzw.\
-$EA \to \infty$, und Randbedingungen zum Nachlesen gibt es nicht. Für die Handrechnung in
-\textbf{TM2} nehmt ihr deshalb besser das Rand-LGS. Die alten Exporte sind gut zum schnellen
+Modus stammen sie aus der Superposition (Abschnitt~\ref{sec:symbolisch}). Eine als Zahl eingegebene
+\textbf{Temperatur} steckt mit drin: Sie ändert die Differentialgleichung im Stab nicht
+($EI\,w'''' = q$, $EA\,u'' = -n$), sondern wirkt über die Endverschiebungen, und die kommen aus
+dem WGV mit Temperatur. Für Schnittgrößen daraus gilt $M = -EI\,(w'' + \kappa_T)$ und
+$N = EA\,(u' - \varepsilon_T)$ (Abschnitt~\ref{sec:temperatur}). Bei \textbf{starren Stäben} gibt
+es $EI\,w$ bzw.\ $EA\,u$ nicht ($EI \to \infty$). Dort stehen in \code{v\_EI\_stab} bzw.\
+\code{u\_EA\_stab} die Verschiebungen $w$ bzw.\ $u$ selbst, genau wie bei \code{wneu} im Rand-LGS,
+und die Meldung nennt die Stäbe (\emph{Starr: v\_EI\_stab = w bei Stab 2}). Im symbolischen Modus
+lässt der Export starre Stäbe aus, nehmt dafür das Rand-LGS. Randbedingungen zum Nachlesen gibt es
+hier nicht, für die Handrechnung in \textbf{TM2} nehmt ihr deshalb besser das Rand-LGS. Die alten Exporte sind gut zum schnellen
 Kontrollieren, und die Schnittgrößenverläufe gibt es nur hier.
 
 \subsection{\texorpdfstring{Rand-LGS: \code{wneu}, \code{uneu}, \code{wv}, \code{uv}, \code{randbed}}{Rand-LGS: wneu, uneu, wv, uv, randbed}}\label{sec:randlgs}
@@ -1104,9 +1323,9 @@ Exportiert werden:
   \toprule
   \textbf{Variable} & \textbf{Inhalt} \\
   \midrule \endhead
-  \code{wneu1(x)}, \dots & $EI\,w_i(x)$, also die Biegelinie in der Form der Handrechnung;
+  \code{wneu1(x)}, \dots & $EI\,w_i(x)$, also die Biegelinie in der Form der Handrechnung.
     $M = -\code{wneu}'' - EI\,\kappa_T$, $Q = -\code{wneu}'''$ (bei starren Stäben siehe unten) \\
-  \code{uneu1(x)}, \dots & $EA\,u_i(x)$; $N = \code{uneu}' - EA\,\varepsilon_T$, ohne Temperatur
+  \code{uneu1(x)}, \dots & $EA\,u_i(x)$. $N = \code{uneu}' - EA\,\varepsilon_T$, ohne Temperatur
     also einfach die Ableitung (bei starren Stäben siehe unten) \\
   \code{wv1(x)}, \dots & $w_i(x)$, die Durchbiegung selbst \\
   \code{uv1(x)}, \dots & $u_i(x)$, die Längsverschiebung selbst \\
@@ -1116,12 +1335,13 @@ Exportiert werden:
 \end{longtable}
 
 \textbf{Temperatur:} Die Ableitung von \code{uneu} ist $EA$ mal die \emph{gesamte} Dehnung, also
-einschließlich der Temperaturdehnung, die keine Kraft erzeugt. Ein Beispiel: Ein Stab mit
+einschließlich der Temperaturdehnung. Eine Kraft erzeugt davon nur der Teil, der behindert wird.
+Ein Beispiel: Ein Stab mit
 $EA = 1{,}2\cdot10^6$\,kN wird um $\Delta T = 10$\,K erwärmt ($\alpha_T = 1{,}2\cdot10^{-5}$), an einem
 Ende eingespannt, am anderen an einer starren Platte, die über weitere Stäbe nur teilweise nachgibt.
-Dann ist \code{d/dx(uneu1(x))} $= 432/17$, die Normalkraft aber
+Dann ist z.\,B.\ \code{d/dx(uneu1(x))} $= 432/17$, die Normalkraft aber
 $N = 432/17 - EA\,\alpha_T\,\Delta T = 432/17 - 144 = -2016/17$, so wie sie auch in
-\code{N\_stab1(x)} steht. Genauso gilt für die Biegung $M = -\code{wneu}'' - EI\,\kappa_T$.
+\code{N\_stab1(x)} stehen würde. Genauso gilt für die Biegung $M = -\code{wneu}'' - EI\,\kappa_T$.
 
 \textbf{Wann \code{wneu} und \code{uneu} etwas anderes sind:} Die Tabelle gilt für dehnbare und
 biegsame Stäbe. Bei starren Stäben (biegesteif, dehnsteif oder über \emph{Standard-EA dehnstarr},
@@ -1129,12 +1349,41 @@ Abschnitt~\ref{sec:starr}) ist $EI$ bzw.\ $EA$ unendlich, und $EI\,w$ bzw.\ $EA\
 nicht mehr hinschreiben. Dann hängt es von der Methode \emph{Starre Stäbe (Export)} ab:
 
 \begin{itemize}
-  \item \emph{direkt} (ab Werk): \code{wneu} eines biegesteifen Stabes ist die Verschiebung
-        $w_i(x)$ selbst, also dasselbe wie \code{wv}, und \code{uneu} eines dehnsteifen Stabes ist
-        $u_i(x)$. Das ist eine Starrkörperbewegung, also eine Gerade; mit Temperatur kommt
-        $-\kappa_T x^2/2$ bzw.\ $\varepsilon_T x$ dazu.
-  \item \emph{Grenzwert}: Solange sich der starre Stab nicht als Ganzes bewegt und keine Temperatur
-        hat, bleibt \code{wneu} $= EI\,w_i(x)$ als Grenzwert stehen, und \code{wv} ist $0$. Bewegt
+  \item \emph{direkt} (ab Werk): Beim elastischen Stab ist
+        \[
+          EI\,w_i(x) = c_1\,\frac{x^3}{6} + c_2\,\frac{x^2}{2} + c_3\,x + c_4 - (\text{Lastanteil}) .
+        \]
+        Darin sind $c_1$ und $c_2$ Kraftgrößen, nämlich $Q(0) = -c_1$ und $M(0) = -c_2$, und
+        $c_3$, $c_4$ Weggrößen (Neigung und Durchbiegung am Stabanfang, mal $EI$). Beim starren Stab
+        fallen die Terme mit $c_1$ und $c_2$ und der Lastanteil aus der Biegelinie weg. Es bleibt die
+        Starrkörperbewegung
+        \[
+          w_i(x) = c_4 + c_3\,x \qquad (\text{mit Temperatur zusätzlich } -\kappa_T x^2/2) ,
+        \]
+        jetzt ohne $EI$, also $c_4 = w_i(0)$ und $c_3 = w_i'(0)$. Das ist genau der Grenzfall
+        $EI \to \infty$: Teilt man die erste Gleichung durch $EI$, gehen die Kraftanteile gegen null,
+        und $c_3$, $c_4$ wachsen mit $EI$ mit, damit sich der Stab trotzdem bewegen kann.
+        $c_1$ und $c_2$ bleiben als Unbekannte im LGS, denn der Stab trägt weiter Kräfte. Sie stehen
+        nur noch in $Q(x)$ und $M(x)$. Damit zerfällt der starre Stab in zwei getrennte Teile: Seine
+        Schnittgrößen ($c_1$, $c_2$) kommen nur aus den Kraftbedingungen (freies Ende, Gelenk,
+        Gleichgewicht am Übergang), seine Bewegung ($c_3$, $c_4$) nur aus den geometrischen
+        Bedingungen, also aus Durchbiegung und Neigung am Lager bzw.\ am Nachbarstab. Beispiel:
+        Kragarm aus elastischem Stab~1 und starrem Stab~2 mit $F$ am freien Ende. Das freie Ende
+        liefert $Q_2$ und $M_2$, die gehen am Übergang an Stab~1 weiter, und Stab~2 übernimmt dort
+        $w_1$ und $w_1'$ und läuft als Gerade weiter. Für die Längslinie gilt dasselbe:
+        $u_i(x) = C_2$ (mit Temperatur zusätzlich $\varepsilon_T x$), und $C_1 = N$ bleibt als
+        Kraftgröße stehen. Die Bedingungen sind dieselben wie beim elastischen Stab, das LGS bleibt
+        gleich groß, und das Ergebnis ist exakt. \code{wneu} eines biegesteifen Stabes ist damit die
+        Verschiebung $w_i(x)$ selbst, also dasselbe wie \code{wv}, und \code{uneu} eines dehnsteifen
+        Stabes ist $u_i(x)$. Die Schnittgrößen eines starren Stabes lassen sich daraus nicht ableiten
+        (siehe unten), sie stehen in \code{N\_stab}$i$, \code{Q\_stab}$i$ und \code{M\_stab}$i$ aus dem
+        Schnittgrößen-Export.
+  \item \emph{Grenzwert}: Jeder starre Stab bekommt $EI = 1/\varepsilon$ bzw.\ $EA =
+        1/\varepsilon$, das Programm löst das Rand-LGS symbolisch in $\varepsilon$ und bildet danach
+        den Grenzwert $\varepsilon \to 0$ (im CAS heißt $\varepsilon$ \code{rleps}). Das dauert
+        länger, zeigt aber, wohin die Biegelinie eines immer steiferen Stabes läuft. Solange sich
+        der starre Stab nicht als Ganzes bewegt und keine Temperatur hat, bleibt \code{wneu}
+        $= EI\,w_i(x)$ als Grenzwert stehen, und \code{wv} ist $0$. Bewegt
         er sich (Riegel eines verschieblichen Rahmens, starrer Balken auf Federn) oder hat er
         Temperatur, ist \code{wneu} wieder die Verschiebung $w_i(x)$. Für \code{uneu} gilt
         dasselbe.
@@ -1147,7 +1396,10 @@ dagegen immer die Verschiebungen. Wer auf Nummer sicher gehen will, rechnet mit 
 
 In \code{randbed} stehen die Bedingungen so, wie man sie von Hand aufschreibt, mit den
 Schnittgrößen als Ableitungen, also \code{-EIw'''} statt $Q$, \code{-EIw''} statt $M$ und
-\code{EAu'} statt $N$:
+\code{EAu'} statt $N$. Bei starren Stäben stehen die Schnittgrößen dagegen mit ihrem Namen da,
+z.\,B.\ \code{\textquotedbl{}Q2(x2=l)=F\textquotedbl{}} und \code{\textquotedbl{}M2(x2=l)=0\textquotedbl{}} (bei dehnsteifen
+Stäben \code{N2(\dots)}), denn dort wäre $EI\,w'''$ unendlich mal null. Das gilt für beide
+Methoden. Ein Beispiel für einen elastischen Stab:
 
 \begin{center}
 \code{[\textquotedbl{}w1(x1=0)=0\textquotedbl{};\textquotedbl{}EIw1''(x1=0)=0\textquotedbl{};\textquotedbl{}w1(x1=l)=w2(x2=0)\textquotedbl{};\dots]}
@@ -1185,7 +1437,7 @@ dass sich die beiden Linien bei einer Handrechnung nicht separat voneinander erm
 
 Mit den exakten Biege- und Längslinien (und sommit auch Schnittgrößen) lassen sich viele
 typischen \textbf{TM2}-Fragen direkt auf dem Rechner beantworten, eben weil \code{wv} und \code{uv} die Verschiebungen selbst sind
-(aus diesem Grund existiert auch die vielleicht etwas verwirrende Aufteilung in \code{wneu} und \code{wv}):
+(aus diesem Grund existiert auch die vielleicht etwas verwirrende Aufteilung in \code{wneu} und \code{wv}), das geht auch über den Knotenexport, siehe unten:
 
 
 \begin{itemize}
@@ -1196,17 +1448,20 @@ typischen \textbf{TM2}-Fragen direkt auf dem Rechner beantworten, eben weil \cod
 \end{itemize}
 
 Voraussetzung ist nur, dass die gesuchte Größe vorher als Symbol eingegeben wurde. Die Funktionen
-sind exakt; wenn ihr Dezimalzahlen wollt, nehmt \code{approx(wneu1(x))}.
+sind exakt. Wenn ihr Dezimalzahlen wollt, nehmt \code{approx(wneu1(x))}.
 
 Ein typischer Ablauf in der Klausur: System zeichnen, alles Unbekannte als Symbol eingeben
 (\code{F}, \code{q}, \code{EI}, \code{dt}), \taste{b}, dann \emph{Neue Biegelinie}. Auf einer
 Calculator-Seite habt ihr jetzt \code{wv1(x)}, \code{wv2(x)}, \dots\ und könnt auswerten, ableiten
-(\code{d(wv1(x),x)} ist die Neigung) oder auflösen. Wie das Rand-LGS intern gelöst wird, steht in
+(\code{d/dx(wv1(x))} über die Ableitungsvorlage ist die Neigung, per Tastatur
+\code{derivative(wv1(x),x)}) oder auflösen. Wie das Rand-LGS intern gelöst wird, steht in
 Abschnitt~\ref{sec:mathe-randlgs}.
 
-\textbf{Grenzen des Rand-LGS:} keine Bögen, kein KGV-Einheitszustand (Zustand~0 wählen), keine
-Lasten in frei beweglichen Richtungen. Wenn etwas schiefgeht, steht der Grund in einer roten Box
-und zusätzlich in \code{randbed} als \code{[\textquotedbl{}Fehler: \dots\textquotedbl{}]}; die alten Funktionen werden vorher
+\textbf{Grenzen des Rand-LGS:} keine Bögen, kein KGV-Einheitszustand (Zustand~0 wählen). Hängt
+ein Knoten nur an N- oder Q-Gelenken, sodass in einer Richtung kein Stab Kraft aufnimmt, und greift
+dort eine Last in dieser Richtung an, ist das System kinematisch. Das Rand-LGS sagt dann
+\emph{Last in frei beweglicher Richtung}, die normale Rechnung \emph{System ist kinematisch}. Wenn etwas schiefgeht, steht der Grund in einer roten Box
+und zusätzlich in \code{randbed} als \code{[\textquotedbl{}Fehler: \dots\textquotedbl{}]}. Die alten Funktionen werden vorher
 gelöscht, es bleibt also nichts Veraltetes stehen, mit dem ihr aus Versehen weiterrechnet.
 
 \subsection{\texorpdfstring{Knotenverschiebungen: \code{ux\_k}, \code{uy\_k}, \code{phi\_k}}{Knotenverschiebungen: ux\_k, uy\_k, phi\_k}}\label{sec:knotenverschiebung}
@@ -1227,7 +1482,7 @@ Für Knoten~$k$ landen im CAS:
   \bottomrule
 \end{longtable}
 
-Für Knoten~2 also \code{ux\_k2}, \code{uy\_k2} und \code{phi\_k2}; die gelbe Box zeigt die drei
+Für Knoten~2 also \code{ux\_k2}, \code{uy\_k2} und \code{phi\_k2}. Die gelbe Box zeigt die drei
 Werte gleich mit an. Beim Kragarm mit Einzellast $F$ an der Spitze kommt
 \code{uy\_k2} $= \frac{F l^3}{3EI}$ und \code{phi\_k2} $= -\frac{F l^2}{2EI}$ heraus: Die Spitze
 geht nach unten und dreht sich im Uhrzeigersinn.
@@ -1237,7 +1492,7 @@ Knotenverschiebung im lokalen System des Stabes, das Programm dreht sie ins glob
 (Abschnitt~\ref{sec:mathe-knotenverschiebung}). Ist der Knoten ein Vollgelenk (oder haben alle
 Stabenden dort ein M-Gelenk), gibt es keine gemeinsame Knotenverdrehung, und \code{phi\_k}$k$
 bleibt leer. Die Verdrehung eines einzelnen Stabendes bekommt ihr dann über
-\code{-d(wv1(x),x)}.
+\code{-d/dx(wv1(x))}.
 
 \textbf{Beim zweiten Knoten geht es schneller.} Das Rand-LGS ist der teure Teil. Das Programm merkt
 sich deshalb die Biege- und Längslinien und löst das LGS nur neu, wenn sich am System etwas
@@ -1273,7 +1528,7 @@ zeigen, dass oben bzw.\ unten noch etwas steht. Ein neuer Text beginnt wieder ob
   \textbf{Meldung} & \textbf{Wann} & \textbf{Warum} \\
   \midrule \endhead
   Symbolischer Modus nicht möglich & Symbolische Eingabe, die das Verfahren nicht abbilden kann
-    (Liste in Abschnitt~\ref{sec:symbolisch}) & Verhindert falsche Ergebnisse; Berechnung und
+    (Liste in Abschnitt~\ref{sec:symbolisch}) & Verhindert falsche Ergebnisse. Berechnung und
     Rand-LGS bleiben gesperrt, auch nachdem ihr die Box geschlossen habt \\
   System ist kinematisch! & Das Gleichungssystem ist singulär & Das System ist ein Mechanismus,
     es gibt keine eindeutige Lösung \\
@@ -1291,7 +1546,7 @@ zeigen, dass oben bzw.\ unten noch etwas steht. Ein neuer Text beginnt wieder ob
 
 \subsection{Hinweise (gelb)}\label{sec:hinweise}
 
-Diese Box kommt nach der Berechnung; das Ergebnis ist trotzdem gültig. Nach \taste{Esc} kommt sie
+Diese Box kommt nach der Berechnung. Das Ergebnis ist trotzdem gültig. Nach \taste{Esc} kommt sie
 erst wieder, wenn sich am System etwas geändert hat. Sie nervt euch also nicht bei jedem
 Rechnen erneut.
 
@@ -1302,8 +1557,9 @@ Rechnen erneut.
   $T_{oben} \ne T_{unten}$, aber $h = 0$ & Temperaturunterschied ohne Höhe &
     Es wirkt nur die mittlere Erwärmung, keine Krümmung \\
   Temperatur symbolisch: Diagrammwerte ohne Temperaturanteil & Symbolischer Modus mit Temperatur &
-    Die Diagrammbeschriftung entsteht durch Superposition und enthält die Temperatur nicht; der
-    Export schon \\
+    Die Diagrammbeschriftung entsteht durch Superposition und enthält die Temperatur nicht. Die
+    Exporte \emph{Neue Biegelinie} und \emph{Neue Längslinie} (\code{wneu}, \code{uneu}, \code{wv},
+    \code{uv}) schon \\
   Stab~$i$ wird auf Biegung belastet, $EI$ ist dort eine Zahl & Symbolischer Modus, der Stab wird
     wirklich gebogen (kein Pendelstab) und hat ein Zahlen-$EI$, während eine symbolische Steifigkeit
     ebenfalls mitwirkt: ein gebogener Stab mit symbolischem $EI$, ein Stab mit Normalkraft und
@@ -1312,7 +1568,7 @@ Rechnen erneut.
     einem Stab, der gar nicht gebogen wird, zählt nicht: Das Ergebnis hängt dann nicht davon ab. Statisch bestimmt: die
     Schnittgrößen bleiben richtig, Biegelinie und Export mischen Zahl und Symbol. Statisch
     unbestimmt: auch die Schnittgrößen können falsch werden (Symbole rechnen intern mit 1).
-    Abhilfe: $EI$ symbolisch, biegesteif oder Gelenke an beiden Enden \\
+    Abhilfe: $EI$ symbolisch, biegesteif oder Gelenke an beiden Enden (Bsp. \ref{ex:Pendelstabannahme}) \\
   Stab~$i$ trägt Normalkraft, $EA$ ist dort eine Zahl & wie oben mit $N \ne 0$ & Abhilfe:
     dehnsteif, Standard-EA dehnstarr oder $EA$ symbolisch \\
   Starre Stäbe halten sich gegenseitig statisch unbestimmt & Das Gleichgewicht legt die
@@ -1321,8 +1577,11 @@ Rechnen erneut.
     wenn die unbestimmte Kraft für jede Annahme null ist, z.\,B.\ die Längskraft in einer starren
     Platte zwischen zwei Loslagern ohne Last in Plattenrichtung \\
   Temperatur in starren Stäben, die sich gegenseitig halten & Behinderte Wärmedehnung starrer
-    Teile & Die Zwangskraft wäre unendlich; die Verformungen gelten, die Kräfte in den starren
+    Teile & Die Zwangskraft wäre unendlich. Die Verformungen gelten, die Kräfte in den starren
     Stäben nicht \\
+  Einheiten: \dots\ hat die Einheit \dots, erwartet wird \dots & Symbolischer Modus, ein Feld passt
+    nicht zu den Einheiten der übrigen (Abschnitt~\ref{sec:symbolisch}) & Vermutlich ein Tippfehler,
+    z.\,B.\ \code{EI/l\^{}2} statt \code{EI/l\^{}3} als Feder. Gerechnet wird trotzdem \\
   \bottomrule
 \end{longtable}
 
@@ -1337,7 +1596,7 @@ Stab 1,2,3,4} (Abschnitt~\ref{sec:randlgs}). Fehlschläge beim Rand-LGS zusätzl
 Bögen nicht unterstützt, Last in frei beweglicher Richtung, unendliche Zwangskraft bei
 behinderter Temperaturverformung eines starren Stabes.
 
-Die Knotenverschiebung meldet sich mit \emph{Knoten $k$: Verschiebung} und den drei Werten; ein
+Die Knotenverschiebung meldet sich mit \emph{Knoten $k$: Verschiebung} und den drei Werten. Ein
 Knoten ohne Stab gibt \emph{hängt an keinem Stab}. Beim Speichern und Öffnen von Systemen:
 \emph{System als system3 gespeichert}, \emph{system3 geöffnet}, \emph{system3 ist nicht
 vorhanden}, \emph{keine gespeicherte Tragwerksdatei} (die Variable enthält etwas anderes),
@@ -1353,7 +1612,13 @@ vorhanden}, \emph{keine gespeicherte Tragwerksdatei} (die Variable enthält etwa
   \item Der symbolische Modus deckt nur die in Abschnitt~\ref{sec:symbolisch} genannten Fälle ab.
   \item Bögen werden für die Rechnung in gerade Teilstäbe zerlegt, Ergebnisse mit Last auf dem
         Bogen hängen deshalb etwas von der Segmentzahl ab. Im Rand-LGS-Export und im symbolischen
-        Modus gehen Bögen nicht.
+        Modus gehen Bögen nicht. Das Rand-LGS setzt die Ansätze des geraden Stabes an, bei dem
+        Biegung ($EI\,w'''' = q$) und Dehnung ($EA\,u'' = -n$) getrennt laufen. Im Bogen sind beide
+        über die Krümmung gekoppelt: Eine Normalkraft erzeugt Biegung und umgekehrt (siehe $M(p)$ in
+        Abschnitt~\ref{sec:mathe-bogen}). Das ist noch lineare Theorie I.~Ordnung, denn das
+        Gleichgewicht steht am unverformten, nur eben gekrümmten Stab. Es braucht aber andere
+        Ansätze. Der symbolische Modus braucht exakte Faktoren, die die Teilstab-Näherung des Bogens
+        nicht liefert.
   \item Das automatisch gewählte KGV-Hauptsystem muss nicht das sein, das ihr von Hand wählen
         würdet. Die Ergebnisse stimmen trotzdem, die Zwischenwerte $\delta_{ij}$ aber natürlich
         nur zu \emph{diesem} Hauptsystem.
@@ -1371,8 +1636,8 @@ letzten Teil der Anleitung (Teil~\ref{sec:Mathe}).
 
 \section{Vorzeichen im Vergleich zu den Formelsammlungen (WGV und FEM)}\label{sec:wgv-vorzeichen}
 
-Dieser Abschnitt ist nur für \textbf{Statik} relevant. Dort habt ihr zwei Formelsammlungen:
-\emph{Weggrößenverfahren} und \emph{Finite Elemente Methode}. Für Stabtragwerke rechnen beide
+Dieser Abschnitt ist nur für \textbf{Statik} relevant. Die zwei Verfahren
+\emph{Weggrößenverfahren} und \emph{Finite Elemente Methode} rechnen für Stabtragwerke beide
 dasselbe, das volle WGV ist nichts anderes als die FEM mit Stab- und Balkenelementen (linearer Ansatz längs, Hermite-Funktionen
 $N_1 \dots N_4$ quer, Lastvektoren aus $\int N\,q\,dx$). Sie unterscheiden sich nur in den
 Vorzeichen, und das Programm rechnet wie die WGV-Formelsammlung.
@@ -1398,7 +1663,7 @@ Längsverschiebungen, Normalkräfte, Drehwinkel und Momente bleiben gleich.
     wie WGV. Zeilen und Spalten von $w$ mal $-1$ ergeben die FEM-Matrix \\
   Knotenlast, Querlast & $F$, $p_z$ nach unten positiv & $F_y$, $q_{\bar y}$ nach oben positiv &
     Eingabe $F_y$, $q$, $p_Y$ nach unten positiv (wie WGV) \\
-  Strecken\-moment & $m_y\,l/2$ als Moment an beiden Enden & -- (würde über $\int m\,N'\,dx$ gehen) &
+  Strecken\-moment & $m_y\,l/2$ als Moment an beiden Enden & -- &
     arbeitsäquivalent: Kräftepaar $\mp m$, keine Endmomente \\
   Lastvektor & Knotenersatzlasten $\mathbf p^l$, $\mathbf s^l = \mathbf k^l \mathbf v^l - \mathbf p^l$ &
     $\mathbf K\,\hat{\mathbf u} = \mathbf f$ mit $\mathbf f = \int \mathbf N\,q\,dx$ &
@@ -1417,14 +1682,14 @@ Längsverschiebungen, Normalkräfte, Drehwinkel und Momente bleiben gleich.
     gegen den Uhrzeigersinn, also wie FEM \\
   $\mathbf K_{red}$, $\mathbf V_{red}$ & gehaltene Freiheitsgrade gestrichen & gleich &
     \code{sys\_k}, \code{sys\_f}, \code{sys\_u}: je Knoten $u$, $w$ (nach unten, bzw.\ in
-    Lagerrichtung), $\varphi$; Stabenden mit Momentengelenk als eigene Drehfreiheitsgrade ganz
+    Lagerrichtung), $\varphi$. Stabenden mit Momentengelenk als eigene Drehfreiheitsgrade ganz
     hinten. Für die FEM die $y$-Zeilen und -Spalten mit $-1$ multiplizieren \\
   \bottomrule
 \end{longtable}
 
 \textbf{Wo eure Zahlen wirklich abweichen können:} nur beim Streckenmoment. Die WGV-Tafel setzt
-$m_y\,l/2$ als Moment an beide Enden, das Programm verteilt es arbeitsäquivalent, so wie es die
-FEM mit $\int m\,N'\,dx$ tun würde. Bei statisch bestimmten Systemen ist das egal, bei statisch
+$m_y\,l/2$ als Moment an beide Enden, das Programm verteilt es arbeitsäquivalent
+(Abschnitt~\ref{sec:mathe-festeinspann}). Bei statisch bestimmten Systemen ist das egal, bei statisch
 unbestimmten liefert das Programm die exakte Lösung, und eure WGV-Rechnung kann leicht davon
 abweichen. Alles andere sind reine Vorzeichenfragen.
 
@@ -1446,18 +1711,19 @@ ist (Abschnitt~\ref{sec:qs-kos}).
   \item Form auswählen (Ziffer) und die nötigen Punkte klicken.
   \item Mit dem Zeiger auf einem Element und \taste{Enter} öffnet sich dessen Bearbeitungsmenü
         (Koordinaten, Dicke, Loch/Positiv, bei Kreisausschnitt, Kreisabschnitt und Kreisbogen
-        \emph{P2 und P3 tauschen}, Löschen); ein Klick vorher ist nicht nötig.
+        \emph{P2 und P3 tauschen}, Löschen). Ein Klick vorher ist nicht nötig.
   \item \taste{e} (=Ergebnisse) zeigt die Querschnittswerte, \taste{t} (=Tabelle) die Einzelwerte je Element.
-  \item \taste{b} (=berechnen) öffnet das Berechnungsmenü für Spannungen, Schub, Kernfläche und Verwölbung.
+  \item \taste{b} (=berechnen) öffnet das Berechnungsmenü für Spannungen, Schub, Kernfläche,
+        Verwölbung und die Trägheitsmomente im gedrehten System.
 \end{enumerate}
 
 Zeichnen könnt ihr grob, die Koordinaten korrigiert ihr danach im Elementmenü exakt. Das ist
 meist schneller, als von Anfang an genau zu klicken. Es empfielt sich jedoch von Beginn an einen der Aufgabe angepassten
 Rasterabstand im Obermenue zu wählen.
 
-Für \textbf{TM2} gilt eine Faustregel: Dünnwandige Profile (I, C, Z, Kastenträger) zeichnet ihr
+Dünnwandige Profile (I, C, Z, Kastenträger) zeichnet ihr
 mit \taste{d} als Mittellinie, alles andere mit \taste{m}. Nur dünnwandige Profile bekommen Schub
-über den Schubfluss, Torsion und Verwölbung; massive Querschnitte bekommen Schub nur über
+über den Schubfluss, Torsion und Verwölbung. Massive Querschnitte bekommen Schub nur über
 $\tau = QS/(Ib)$. Schub für massive Querschnitte kahm meines Wissens aber noch in keiner Klausur drann,
 die Formel dient eher der Herleitung für Schub dünnwandiger Profiele.
 
@@ -1497,15 +1763,18 @@ geklickten Punkte des Elements, das gerade entsteht. Genommen wird immer der nä
 trefft ihr auch Punkte, die nach einer exakten Koordinateneingabe oder einer KOS-Verschiebung
 nicht mehr auf dem Raster liegen.
 
-Die Wanddicke kommt aus der Standarddicke $t$ (Optionsmenü \taste{o}); einzelne Elemente ändert
-ihr nachträglich über Hover~+~\taste{Enter}. \taste{Del} löscht das letzte Element bzw den Letzten gesetzten Punkt bei einem Linienzug,
+Die Wanddicke kommt aus der Standarddicke $t$ (Optionsmenü \taste{o}). Einzelne Elemente ändert
+ihr nachträglich über Hover~+~\taste{Enter}. \taste{Del} löscht das Element unter dem Zeiger, also
+das hervorgehobene (auch Kreise, Bögen, Löcher und Kräfte). Steht der Zeiger auf keinem Element,
+löscht \taste{Del} nichts und zeigt einen Hinweis. Während ihr einen Linienzug zeichnet, nimmt
+\taste{Del} den zuletzt gesetzten Punkt zurück, in Eingabefeldern löscht es ein Zeichen.
 \taste{ctrl}+\taste{Del} oder \taste{c} löscht alles, nach einer Rückfrage, die ihr mit \taste{Enter}
 bestätigt oder mit \taste{Esc} abbrecht.
 
 \textbf{Kräfte:} Eine neu platzierte Kraft hat zunächst alle Komponenten null. Ihre Werte gebt
 ihr wie bei den Elementen über Hover und \taste{Enter} ein: Lage, die beiden Komponenten in der
-Querschnittsebene und die Komponente senkrecht dazu (die Normalkraft). Im selben Menü löscht ihr
-die Kraft auch wieder, \taste{Del} erreicht Kräfte nicht.
+Querschnittsebene und die Komponente senkrecht dazu (die Normalkraft). Löschen könnt ihr die Kraft
+im selben Menü oder mit dem Zeiger darauf und \taste{Del}.
 
 \textbf{Überlappung:} Liegt ein neues Massivelement komplett in einem vorhandenen, wird es
 automatisch und exakt als Loch abgezogen. Überdeckt es ein vorhandenes nur teilweise (gemeinsame
@@ -1528,8 +1797,9 @@ Im Optionsmenü (\taste{o}):
         Nmm),
   \item Profilbeiwert $\xi$ für die Torsion offener Profile,
   \item auf Seite~2 (\emph{Weitere Optionen}, Pfeil links/rechts): KOS in den Schwerpunkt
-        verschieben, KOS entlang $y$ bzw.\ $z$ um einen Betrag verschieben, \emph{Rasterpunkte}
-        (keine, normal, dick, wie im Tragwerksskript) und \emph{FTM-Bezug},
+        verschieben, KOS entlang $y$ bzw.\ $z$ um einen Betrag verschieben, \emph{FTM-Bezug},
+        \emph{Rasterpunkte} (keine, normal, dick, wie im Tragwerksskript. Unter 5 Pixel Abstand
+        blendet das Programm sie aus) und \emph{Bemaßung} (aus, an, mit Schwerpunkt),
   \item auf Seite~3 (\emph{Querschnittswerte}): $A$, $I_y$, $I_z$, $I_{yz}$ und den Schwerpunkt
   $y_S$, $z_S$ von Hand setzen, falls die Aufgabe Werte vorgibt, die eigentlich nicht zum
   Querschnitt passen.
@@ -1548,7 +1818,7 @@ Werten und sagt euch das einmal. Punkt~7 stellt die berechneten Werte auch ohne 
 \textbf{Schwerpunkt überschreiben (Punkte 5 und 6):} Manchmal gibt die Aufgabe auch den
 Schwerpunkt anders vor, als er aus der Skizze folgt, etwa einen Abstand von 2\,cm, wo die Geometrie
 $5/3$\,cm liefert. Gebt dann $y_S$ und $z_S$ im angezeigten KOS und in der eingestellten
-Längeneinheit ein; die jeweils andere Koordinate bleibt stehen. Der gesetzte Schwerpunkt gilt für
+Längeneinheit ein. Die jeweils andere Koordinate bleibt stehen. Der gesetzte Schwerpunkt gilt für
 \begin{itemize}
   \item die Hebel der Normalkräfte (\emph{$M_y$ aus Normalkräften} usw.), also genau das Moment
         einer außermittig angreifenden Längskraft,
@@ -1560,10 +1830,21 @@ Schwerpunkt der gezeichneten Geometrie. Sie integrieren über die gezeichneten W
 deren eigenen Schwerpunkt ist das statische Moment der ganzen Fläche null. Wichtig: Den
 Schwerpunkt zu verschieben ändert die Trägheitsmomente \emph{nicht}, es gibt keinen automatischen
 Steiner-Anteil. Gibt die Aufgabe einen anderen Schwerpunkt vor, gibt sie meistens auch $I_y$, $I_z$
-mit; setzt die dann ebenfalls von Hand. Der Schwerpunkt wird relativ zum Querschnitt gespeichert:
+mit. Setzt die dann ebenfalls von Hand. Der Schwerpunkt wird relativ zum Querschnitt gespeichert:
 Verschiebt ihr danach das KOS, bleibt er an derselben Stelle der Zeichnung.
+Verschiebt ihr dagegen das KOS in den gegebenen Schwerpunkt und stellt den FTM-Bezug auf das KOS,
+liefert die Einzelwerte-Tabelle die gewünschten Ergebnisse.
 
-\textbf{KOS entlang einer Achse verschieben:} Ihr gebt den Betrag in der aktuellen Längeneinheit
+\textbf{Bemaßung (Seite 2, Zeile 6):} Wie im Tragwerksskript zeichnet das Programm eine
+Maßkette unter den Querschnitt und eine links daneben. Bemaßt werden alle Ecken, die Endpunkte
+der Linien, Kreismittelpunkte und die äußersten Punkte von Kreisen und Bögen, bei dünnwandigen
+Elementen die Mittellinie. Die Zahlen stehen in der eingestellten Längeneinheit. Bei \emph{mit
+Schwerpunkt} kommt der Schwerpunkt als violette Marke \emph{S} in beide Ketten, so lest ihr seine
+Abstände zu den Kanten direkt ab. In den Ansichten für Schub,
+Verwölbung, $\sigma_x$ und Kernfläche ist die Bemaßung aus, weil dort schon über den Querschnitt
+gezeichnet wird. \taste{h} (Zoom auf den Querschnitt) lässt unten und links Platz für die Ketten.
+
+\textbf{KOS entlang einer Achse verschieben:}Ihr gebt den Betrag in der aktuellen Längeneinheit
 ein, positiv heißt in positive Achsrichtung. Der Querschnitt bleibt auf dem Bildschirm stehen,
 das KOS (und mit ihm das Raster) wandert. Zusammen mit dem FTM-Bezug \emph{KOS} bekommt ihr so
 die Trägheitsmomente um jede beliebige parallele Achse.
@@ -1571,7 +1852,7 @@ die Trägheitsmomente um jede beliebige parallele Achse.
 \textbf{FTM-Bezug} legt fest, worauf sich die angezeigten Flächenträgheitsmomente beziehen: auf
 den \emph{Schwerpunkt} (Standard, Anzeige $I_{y,S}$) oder auf den \emph{Ursprung des gezeichneten
 KOS} (Anzeige $I_y$~(KOS)). Beides braucht man: Mit dem Bezug \emph{KOS} seht ihr in der
-Einzelwerte-Tabelle die Steiner-Anteile zum Ursprung, so wie man eine Handrechnung aufbaut; mit
+Einzelwerte-Tabelle die Steiner-Anteile zum Ursprung, so wie man eine Handrechnung aufbaut. Mit
 dem Bezug \emph{Schwerpunkt} bekommt ihr direkt die Werte, mit denen ihr Spannungen rechnet.
 
 Alle Ein- und Ausgaben beziehen sich auf das \emph{angezeigte} Koordinatensystem: Dreht ihr das
@@ -1582,8 +1863,9 @@ Das ist praktisch, wenn die Aufgabe das KOS anders herum definiert als ihr gezei
 
 \taste{e} zeigt das Ergebnisfeld: Fläche, Schwerpunkt, Flächenmomente, Hauptträgheitsmomente mit
 Hauptachsenwinkel, Widerstandsmomente und nach einer Schubrechnung auch die Schubwerte.
-\taste{t} zeigt dieselben Werte je Element, inklusive der Steiner-Anteile; das ist die Tabelle,
-die ihr in der Klausur sowieso aufschreibt. Für \textbf{TM1} (Schwerpunkt) und \textbf{TM2}
+\taste{t} zeigt die für die Berechnung des FTM relevanten
+Werte je Element, inklusive der Steiner-Anteile. Das ist die Tabelle,
+die ihr in der Klausur meist sowieso aufschreibt. Für \textbf{TM1} (Schwerpunkt) und \textbf{TM2}
 (Flächenträgheitsmomente) ist das also die schnellste Kontrolle eurer Rechnung. Was jede Zeile
 bedeutet, steht in Abschnitt~\ref{sec:qs-tabellen}.
 
@@ -1593,10 +1875,30 @@ Zwei Zeilen im Ergebnisfeld ganz unten solltet ihr immer anschauen:
   \item \textcolor{green!50!black}{\textbf{Hauptachsen parallel zu den Achsen ($I_{yz} = 0$)}}:
         Die einfachen Formeln gelten.
   \item \textcolor{orange!80!black}{\textbf{Hauptachsen nicht parallel zu den Achsen}}:
-        schiefe Biegung; $\sigma_x$ und der Schubfluss brauchen die gekoppelten Formeln. Das
+        schiefe Biegung. $\sigma_x$ und der Schubfluss brauchen die gekoppelten Formeln. Das
         Programm rechnet damit, ihr müsst es aber wissen, wenn ihr die Rechnung von Hand
         nachvollziehen wollt.
 \end{itemize}
+
+Das Hauptachsensystem (HAS) zeichnet das Programm im Schwerpunkt ein, und zwar wie das KOS in
+fester Größe auf dem Bildschirm (etwa ein Drittel der KOS-Achsen). Es bleibt also auch beim
+Herauszoomen sichtbar.
+
+\textbf{Gedrehtes System} (\taste{b}, \emph{8. Gedrehtes System}): Die Abfrage will einen Winkel
+$\varphi$ in Grad, positiv von $y$ nach $z$, also gegen den Uhrzeigersinn, wie ihr den Querschnitt
+seht. Sie zeigt dazu den Winkel $\varphi^*$ der Hauptachse~1. Danach steht im Ergebnisfeld unter
+\code{alpha} ein Block mit $I_\eta$, $I_\zeta$ und $I_{\eta\zeta}$ für die um $\varphi$ gedrehten
+Achsen, bezogen auf den Schwerpunkt bzw.\ beim FTM-Bezug \emph{KOS} auf den KOS-Ursprung:
+\[
+  I_\eta = \tfrac{I_y + I_z}{2} + \tfrac{I_y - I_z}{2}\cos 2\varphi + I_{yz}\sin 2\varphi, \quad
+  I_\zeta = \tfrac{I_y + I_z}{2} - \tfrac{I_y - I_z}{2}\cos 2\varphi - I_{yz}\sin 2\varphi, \quad
+  I_{\eta\zeta} = -\tfrac{I_y - I_z}{2}\sin 2\varphi + I_{yz}\cos 2\varphi
+\]
+(Vorzeichen aus dem Gross, $I_{yz} = -\int yz\,dA$). Bei $\varphi = \varphi^*$ ist
+$I_{\eta\zeta} = 0$ und $I_\eta = I_1$. Die gedrehten Achsen $\eta$, $\zeta$ stehen orange in der
+Zeichnung. \taste{Esc} in der Abfrage bricht ab, \taste{Esc} danach beendet das gedrehte System.
+In \textbf{TM2} ist das die Aufgabe \enquote{Berechnen Sie die Flächenmomente für die um
+$30^\circ$ gedrehten Achsen}.
 
 
 \section{\texorpdfstring{Normalspannung $\sigma_x$}{Normalspannung sigma-x}}
@@ -1630,7 +1932,7 @@ Schnittgrößen und Extremwerten steht dort:
   \item die \textbf{neutrale Faser} $\sigma_x = 0$ in beiden Systemen, z.\,B.\ $z = m\,y + n$.
 \end{itemize}
 
-Liegt euer KOS nicht im Schwerpunkt, steckt das in der Konstanten $c_0$ der KOS-Gleichung; die
+Liegt euer KOS nicht im Schwerpunkt, steckt das in der Konstanten $c_0$ der KOS-Gleichung. Die
 Lage des Schwerpunkts steht darunter. Die HAS-Gleichung ist immer auf den Schwerpunkt bezogen.
 
 \textbf{Querkräfte mit Hebelarm:} Habt ihr Kräfte eingezeichnet, die in der Querschnittsebene
@@ -1648,6 +1950,7 @@ egal. Rechnet man es für beide Seiten mit $\vec M = \pm\,\vec r \times \vec F$ 
 jedes Mal $M_y = -a F_z$ heraus. Denkt an einen Kragarm: Eine Last nach unten macht immer Zug
 oben, egal ob der Kragarm nach links oder nach rechts auskragt. Ein negatives $\Delta x$ nimmt
 das Programm deshalb als Betrag. Ohne Kräfte in der Querschnittsebene gibt es das Feld nicht.
+Falls entlang des Balkens eine Streckenlast angreift, lässt sich diese durch Berechnung der Teilresultierenden auch abbilden.
 
 \section{Schubspannung und Schubmittelpunkt}
 
@@ -1670,10 +1973,10 @@ Kräfte werden dazugezählt. Danach wählt ihr mit \taste{v} den Verlauf, die Zi
 \end{longtable}
 
 Der \emph{Schubmittelpunkt} wird aus den Momenten der Schubflüsse für Einheitsquerkräfte
-bestimmt; mit der Momententabelle (\taste{t}, wenn der Schubmittelpunkt über \taste{b},
+bestimmt. Mit der Momententabelle (\taste{t}, wenn der Schubmittelpunkt über \taste{b},
 Punkt~6 eingeblendet ist) könnt ihr die Rechnung Segment für
 Segment nachvollziehen. Für \textbf{TM2} lohnt sich das: Die Tabelle ist genau die Rechnung, die
-ihr beim C- oder Z-Profil von Hand macht, und ihr seht, welches Segment welchen Anteil liefert.\\
+ihr von Hand macht, und ihr seht, welches Segment welchen Anteil liefert.\\
 \textbf{Wichtig} zu erwähnen ist, dass ihr die Teilschubkräfte und das aus ihnen entstehende Moment
 mit der Querkraft aus der Aufgabe skalieren müsst. \\
 Der Hebelarm der der Kräfte wird nicht direkt ermittelt,
@@ -1688,11 +1991,32 @@ umstädlich wirkende Rechenweg.
   \item offene dünnwandige Profile, auch unsymmetrische (mit $I_{yz}$-Kopplung),
   \item Profile mit genau einer geschlossenen Zelle, auch mit offenen Ästen (mit Symmetrieachse
         parallel zur Querkraft über die Symmetrie, sonst über die Verträglichkeit, siehe unten),
-  \item massive Querschnitte mit $\tau = QS/(Ib)$, aber nur bei $I_{yz} = 0$.
+  \item dünnwandige Kreise und Bögen, frei oder an andere Elemente angeschlossen, offen oder als
+        Teil einer Zelle (z.\,B.\ D-Profil aus Halbkreis und Platte, Rohr aus zwei Halbkreisen,
+        C-Profil mit runden Ecken),
+  \item massive Querschnitte mit $\tau = QS/(Ib)$, aber nur bei $I_{yz} = 0$. Am oberen und
+        unteren Rand ist $S = 0$ und damit $\tau = 0$, auch an Spitzen und am Kreisscheitel. An
+        einem Breitensprung (Flansch und Steg, Lochrand) zeigt der Verlauf beide Werte.
 \end{itemize}
 
 Nicht berechnet werden: mehrzellige Profile, gemischt massiv-dünnwandige Querschnitte und massive
 Querschnitte mit gedrehten Hauptachsen. Dann kommt eine rote Box mit dem Grund.
+
+\textbf{Kreise und Bögen} stehen im Profilgraph als Kette kurzer Sehnen (höchstens $15^\circ$ je
+Sehne). Die Sehnen legen nur fest, wo Knoten liegen und welche Teile zusammenhängen. Gerechnet wird
+auf dem Bogen selbst: Die Stützstellen liegen auf dem Bogen, die statischen Momente werden dort
+geschlossen integriert, und als Länge zählt die Bogenlänge. Die Fläche $A_m$ einer Zelle rechnet
+das Programm wie bei geraden Linien als Vieleck über die Knoten (Gaußsche Trapezformel). Dem
+Vieleck fehlt dann je Sehne genau die Fläche zwischen Sehne und Bogen, der Kreisabschnitt
+$\frac{R^2}{2}(\Delta\varphi - \sin\Delta\varphi)$. Den zählt das Programm dazu (bzw.\ ab, wenn der
+Bogen nach innen gewölbt ist), damit ist $A_m$ exakt die Fläche, die die Mittellinie einschließt.
+Beim D-Profil aus Halbkreis und Platte kommt so genau $\pi R^2/2$ heraus.
+Deshalb bleibt kein Promillefehler übrig: D-Profil,
+offener Halbkreis ($e = 4R/\pi$) und Kreisrohr stimmen mit der Handrechnung auf etwa $10^{-9}$ überein.
+Zu gemeinsamen Knoten werden Bogenenden auf dem Endpunkt oder im Inneren eines anderen Elements,
+Endpunkte anderer Elemente auf dem Bogen und Kreuzungen mit geraden Linien und mit anderen Bögen. Ein
+Bogenende, das ihr über den Fangpunkt P3 angeschlossen habt, zählt auch dann als verbunden, wenn P3
+nicht genau auf dem Radius liegt.
 
 \subsection{Geschlossene Zellen: warum die Symmetrie so wichtig ist}
 
@@ -1706,10 +2030,13 @@ Genau das macht das Programm:
 \begin{itemize}
   \item Es prüft die Spiegelsymmetrie, indem es die Mittellinien abtastet. Die Symmetrie wird
         also auch erkannt, wenn ihr die beiden Hälften unterschiedlich in Segmente geteilt habt.
-  \item Das Ergebnisfeld zeigt bei geschlossenen Profilen \code{Zellsymmetrie: <Achse>} bzw.\
-        \code{keine erkannt (q0 offen)}, und zwar schon vor der Schubrechnung.
+  \item Das Ergebnisfeld zeigt bei geschlossenen Profilen schon vor der Schubrechnung, was es
+        erkannt hat: \code{Zellsymmetrie: z, y-Achse} (beide Lastrichtungen über die Symmetrie),
+        \code{Zellsymmetrie: z-Achse} mit der Zeile \code{q0 fuer Q\_y aus Vertraeglichkeit}
+        darunter, oder \code{keine erkannt} mit \code{q0 aus Vertraeglichkeit}. Bestimmt ist $q_0$
+        also immer, nur der Weg ist ein anderer (Abschnitt~\ref{sec:mathe-zelle}).
   \item Die Zelle wird \emph{auf der Symmetrieachse} aufgeschnitten. Die Laufvariable beginnt
-        damit dort, wo $S = 0$ ist; die Marke im Verlauf heißt \emph{Start (Symmetrieachse)}.
+        damit dort, wo $S = 0$ ist. Die Marke im Verlauf heißt \emph{Start (Symmetrieachse)}.
   \item Auch die angezeigten $S$-Verläufe sind auf diesen Schnitt bezogen, nicht nur $\tau$.
 \end{itemize}
 
@@ -1731,7 +2058,7 @@ Praktisch daran: Die Bedingung zerfällt in $\oint S_z/t\,ds = 0$ und $\oint S_y
 Programm verschiebt also jedes statische Moment um seine eigene Konstante. Damit stimmen nicht nur
 $\tau$, sondern auch die angezeigten $S$-Verläufe, und der Schubmittelpunkt ist für jede einzellige
 Zelle bestimmt, also geht auch \emph{Torsion aus Kräften}. Beim symmetrischen Profil kommt exakt die
-antisymmetrische Lösung heraus; die Marke im Verlauf heißt dann \emph{Schnitt (q0 aus
+antisymmetrische Lösung heraus. Die Marke im Verlauf heißt dann \emph{Schnitt (q0 aus
 Verträglichkeit)}.
 
 \textbf{Die Warnung bleibt trotzdem}, und zwar an zwei Stellen: bei der Schubrechnung selbst
@@ -1766,15 +2093,35 @@ Torsion rechnet das Programm nur für rein dünnwandige Profile:
         Mittelpunkt.
 \end{itemize}
 
-Dünnwandige Bögen gehen in die offene Formel ein, solange sie frei stehen. Schließen sie an andere
-Elemente an, könnte eine Zelle entstehen, die der Schubgraph nicht sieht. Dann lehnt das
-Programm die Torsion ab.
+\textbf{Vorzeichen im Torsionsanteil (Verlauf 8):} Wie alle Schubverläufe zählt er positiv in
+Laufrichtung $s$ (Verlauf 0 zeigt sie). In einer geschlossenen Zelle ist das der Schubfluss nach
+Bredt, er läuft bei positivem $M_T$ gegen den Uhrzeigersinn um. In einer \emph{offenen} Wand ist
+$\tau$ über die Dicke linear verteilt: An den beiden Rändern ist sie gleich groß, $M_T\,t/I_T$,
+aber entgegengesetzt, sie läuft in jeder Wand für sich im Drehsinn von $M_T$ um. Der Verlauf zeigt
+den Wert am \emph{rechten} Rand in Laufrichtung. Dort läuft $\tau$ bei positivem $M_T$ in
+Laufrichtung, alle offenen Wände haben also das Vorzeichen von $M_T$, am linken Rand steht derselbe
+Wert mit umgekehrtem Vorzeichen. Wierum ihr die Elemente gezeichnet habt, spielt dabei keine Rolle.
+Für $\tau_{max}$ zählt ohnehin der Betrag.
+
+\textbf{Gesamtschubspannung (Verlauf 9):} In einer Zelle sind Querkraftschub und Bredt-Schubfluss
+über die Dicke konstant, das Programm addiert sie deshalb mit Vorzeichen. In einer offenen Wand ist
+der Querkraftanteil $\tau_Q$ über die Dicke konstant, der Torsionsanteil wechselt aber von Rand zu
+Rand das Vorzeichen. An einem der beiden Ränder zeigen beide in dieselbe Richtung, und dort ist
+$|\tau_Q| + |\tau_T|$ der Größtwert. Genau den zeigt der Verlauf, mit der Richtung von $\tau_Q$
+(positiv in Laufrichtung). Wo $\tau_Q = 0$ ist, etwa an freien Enden, bekommt er das Vorzeichen
+von $M_T$. Haben $\tau_Q$ und $M_T$ dasselbe Vorzeichen, liegt der Größtwert am rechten Rand in
+Laufrichtung, sonst am linken.
+
+Freie Bögen gehen mit ihrer Bogenlänge in die offene Formel ein. Schließt ein Bogen zusammen mit
+anderen Elementen eine Zelle (D-Profil, Rohr aus zwei Halbkreisen, Kasten mit runden Ecken),
+rechnet das Programm Bredt mit dieser Zelle, $A_m$ und $\oint ds/t$ sind exakt (siehe Kreise und
+Bögen beim Schub). Das Kreisrohr aus einem einzelnen Kreis liefert dasselbe Ergebnis.
 
 Das Torsionsmoment könnt ihr eingeben oder aus platzierten Kräften bestimmen lassen, Bezugspunkt
-ist dann der \emph{Schubmittelpunkt}. Zum Eingeben rechnet ihr erst die Schubspannung; danach
-öffnet \taste{b} das Zusatzmenü \emph{Äußere Belastungen hinzufügen}, und die Maske fragt
+ist dann der \emph{Schubmittelpunkt}. Zum Eingeben rechnet ihr erst die Schubspannung. Danach
+öffnet bei Bedarf \taste{b} das Zusatzmenü \emph{Äußere Belastungen hinzufügen}, und die Maske fragt
 nacheinander die beiden Querkräfte und $M_T$ ab. Eine Normalkraft gibt es dort nicht, weil sie auf
-den Schub keinen Einfluss hat; ihre Spannung $\sigma_x = N/A$ rechnet ihr über die
+den Schub keinen Einfluss hat. Ihre Spannung $\sigma_x = N/A$ rechnet ihr über die
 $\sigma_x$-Berechnung. Für massive und gemischte Querschnitte gibt es keine
 TM2-Formel, für mehrzellige Profile ebenfalls nicht: Das Programm lehnt mit Begründung ab und
 rechnet bewusst keine Prandtl-Lösung, die ihr in der Klausur ohnehin nicht verwenden dürftet.
@@ -1791,10 +2138,14 @@ nach Kapitel~6 der Formelsammlung:
 
 Ein Dialog fragt $M_T$ (vorbelegt mit dem Moment eurer platzierten Kräfte um den
 Schubmittelpunkt, sonst leer) und den Schubmodul $G$ in N/mm$^2$ (vorbelegt 81\,000). Das
-$M_T$ gilt \textbf{nur in dieser Ansicht}: \taste{Esc} schließt sie und verwirft es, an die
+eingegebene $M_T$ \emph{ersetzt} das Moment aus den Kräften, es wird nicht dazugezählt. Wollt ihr
+beides, schreibt die Summe hinein, z.\,B.\ \code{12.5+3}. Achtung: Getippte Ziffern hängen sich an
+die Vorbelegung an, zum Ersetzen also erst löschen. Das $M_T$ gilt \textbf{nur in dieser Ansicht}: \taste{Esc} schließt sie und verwirft es, an die
 Torsion der Schubspannungsrechnung wird es nicht übergeben. Der Verlauf wird wie die
-Schubverläufe normal zur Wand gezeichnet, $M_T$ als Drehpfeil um den Pol; \taste{e} zeigt
-$\vartheta$, $I_T$, $A_m$ und $u_{x,max}$.
+Schubverläufe normal zur Wand gezeichnet, $M_T$ als Drehpfeil um den Pol. \taste{e} zeigt
+$\vartheta$, $I_T$, $A_m$ und $u_{x,max}$. Die Verwölbung ist meist sehr klein (bei Stahl oft
+$10^{-4}$\,mm). Werte unter 0,01 stehen deshalb im Verlauf und im Ergebnisfeld als Zehnerpotenz da,
+z.\,B.\ \code{1.029·10\^{}-4}, ebenso eine kleine Verdrillung $\vartheta$.
 
 Drei Dinge, die ihr aus der Handrechnung kennt und die das Programm genauso macht:
 
@@ -1842,12 +2193,13 @@ die Achse mit $I_\eta = I_1$.
 
 \section{Ergebnisfeld und Tabellen im Überblick}\label{sec:qs-tabellen}
 
-Alle Werte stehen im angezeigten KOS und in den eingestellten Einheiten (Optionen, \taste{o}).
+Alle Werte stehen im angezeigten KOS oder auf den Schwerpunkt bezogen (Einstellung) und in den eingestellten Einheiten (Optionen, \taste{o}).
 Welche Ansicht kommt, hängt davon ab, was gerade gerechnet ist:
 
 \begin{itemize}
   \item \taste{e} öffnet das \textbf{Ergebnisfeld} rechts neben der Zeichnung (nicht, solange ein
-        $\sigma_x$-Ergebnis angezeigt wird).
+        $\sigma_x$-Ergebnis angezeigt wird). Pfeil hoch/runter scrollt bis zur letzten Zeile, auch
+        wenn Schub, Verwölbung und Torsion viele Zeilen anhängen.
   \item \taste{t} öffnet nach einer $\sigma_x$-Berechnung die \textbf{$\sigma_x$-Tabelle}, bei
         eingeblendetem Schubmittelpunkt die \textbf{Momententabelle}, sonst die
         \textbf{Einzelwerte-Tabelle}. Die Pfeiltasten scrollen.
@@ -1859,9 +2211,9 @@ Welche Ansicht kommt, hängt davon ab, was gerade gerechnet ist:
   \toprule
   \textbf{Zeile} & \textbf{Bedeutung} \\
   \midrule \endhead
-  \code{A} & Fläche; \emph{(manuell)}, wenn ihr sie überschrieben habt \\
-  \code{y\_s}, \code{z\_s} & Lage des Schwerpunkts im KOS; \emph{(manuell)}, wenn ihr ihn gesetzt habt \\
-  \code{I\_y,S}, \code{I\_z,S}, \code{I\_yz,S} & Flächenmomente um den Schwerpunkt; mit
+  \code{A} & Fläche. \emph{(manuell)}, wenn ihr sie überschrieben habt \\
+  \code{y\_s}, \code{z\_s} & Lage des Schwerpunkts im KOS. \emph{(manuell)}, wenn ihr ihn gesetzt habt \\
+  \code{I\_y,S}, \code{I\_z,S}, \code{I\_yz,S} & Flächenmomente um den Schwerpunkt. Mit
     \emph{FTM-Bezug KOS} stattdessen \code{I\_y (KOS)} usw.\ um den KOS-Ursprung. Das
     Deviationsmoment hat das Vorzeichen aus dem Gross, $I_{yz} = -\int y\,z\,dA$ \\
   \code{i\_y}, \code{i\_z} & Trägheitsradien $i = \sqrt{I/A}$ \\
@@ -1877,10 +2229,11 @@ Welche Ansicht kommt, hängt davon ab, was gerade gerechnet ist:
   \code{Q\_y aus Kraeften} usw. & Anteil der gezeichneten Kräfte \\
   \code{tau\_max}, \code{bei (y,z)} & größte Schubspannung aus Querkraft und ihr Ort \\
   \code{tau\_gesamt,max} & mit Torsion, falls eine gerechnet ist \\
-  \code{Schubmittelpunkt} & Lage im KOS; bei einer Zelle ohne passende Symmetrie nur eine
-    Koordinate bzw.\ \emph{statisch unbestimmt} \\
+  \code{Schubmittelpunkt} & Lage im KOS. Bei einer Zelle immer beide Koordinaten (ohne passende
+    Symmetrie über die Verträglichkeit). Nicht bestimmbar nur, wenn die Schubrechnung ablehnt
+    (mehrzellig) \\
   \code{Probe-Ma}, \code{Probe-Mb} & Moment der Schubflüsse um den Schwerpunkt für die
-    Einheitslasten; daraus folgt die Lage des Schubmittelpunkts (Abschnitt~\ref{sec:mathe-schub}) \\
+    Einheitslasten. Daraus folgt die Lage des Schubmittelpunkts (Abschnitt~\ref{sec:mathe-schub}) \\
   \midrule
   \multicolumn{2}{l}{\emph{nach Verwölbung bzw.\ Torsion}} \\
   \code{MT}, \code{G}, \code{I\_T} & Torsionsmoment, Schubmodul, Torsionsträgheitsmoment \\
@@ -1898,8 +2251,7 @@ Ganz unten stehen der Hinweis zu den Hauptachsen (Abschnitt~\ref{sec:qs-werte}) 
 
 Eine Spalte je Element: \code{M1}, \code{M2}, \dots\ für massive, \code{D1}, \dots\ für
 dünnwandige. Rot mit \emph{numerisch} heißt Rasternäherung. Die Überschrift nennt den Bezug
-(Schwerpunkt oder KOS-Ursprung, je nach FTM-Bezug). Die Zeilen sind genau die Spalten einer
-Handrechnung:
+(Schwerpunkt oder KOS-Ursprung, je nach FTM-Bezug). Das ist quasi genau wie die Handrechnung:
 
 \begin{longtable}{p{0.34\linewidth}p{0.60\linewidth}}
   \toprule
@@ -1908,7 +2260,7 @@ Handrechnung:
   \code{Flaecheninhalt A} & Fläche des Elements (Löcher negativ) \\
   \code{y}, \code{z} & Schwerpunkt des Elements im KOS \\
   \code{I\_eta}, \code{I\_zeta} (Lokal) & Hauptträgheitsmomente des Elements um seine eigenen
-    Hauptachsen; \code{I\_etazeta (Lokal)} ist deshalb immer 0 \\
+    Hauptachsen. \code{I\_etazeta (Lokal)} ist deshalb immer 0 \\
   \code{I\_y}, \code{I\_z}, \code{I\_yz} (Gedreht) & Eigenanteil: um Achsen parallel zum KOS durch
     den Schwerpunkt des Elements \\
   \code{z\^{}2*A}, \code{y\^{}2*A}, \code{y*z*A} (Steiner) & Steiner-Anteile mit den Abständen des
@@ -1937,7 +2289,7 @@ Habt ihr Querschnittswerte überschrieben, zeigt die Tabelle trotzdem die Werte 
   \code{$\Delta$x Kraftebene}, \code{My/Mz aus Querkraeften} & nur mit Kräften in der Querschnittsebene:
     der abgefragte Abstand und die Momente daraus, $M_y = -\Delta x\,F_z$, $M_z = \Delta x\,F_y$ \\
   \code{A}, \code{Iy}, \code{Iz}, \code{Iyz} & Querschnittswerte der Rechnung (überschriebene,
-    falls gesetzt; dann steht oben \emph{Manuelle Werte} mit ihren Namen, beim Schwerpunkt
+    falls gesetzt. Dann steht oben \emph{Manuelle Werte} mit ihren Namen, beim Schwerpunkt
     \code{y\_S, z\_S}) \\
   \code{N/A} & Anteil der Normalkraft \\
   \code{$\sigma$x,max}, \code{$\sigma$x,min}, \code{bei (y,z)} & Extremwerte und ihre Orte (Eckpunkte) \\
@@ -1969,9 +2321,11 @@ Linie vergleichen.
 \section{Meldungen im Querschnittsskript}
 
 Meldungen erscheinen als Box in der Bildmitte: rot, wenn etwas nicht berechnet wurde oder eine
-Eingabe ungültig war, gelb bei Hinweisen. \taste{Esc} schließt zuerst die Box; sie verschwindet
+Eingabe ungültig war, gelb bei Hinweisen. \taste{Esc} schließt zuerst die Box. Sie verschwindet
 auch, wenn ihr neu rechnet oder den Querschnitt ändert. Passt der Text nicht auf den Bildschirm,
 blättert ihr wie im Tragwerksskript mit \taste{$\uparrow$} und \taste{$\downarrow$} durch ihn.
+Meldungen wie \emph{Ungültige Eingabe} erscheinen auch über einer offenen Eingabemaske,
+\taste{Esc} schließt dann zuerst die Meldung, die Maske bleibt offen.
 
 \begin{longtable}{p{0.40\linewidth}p{0.55\linewidth}}
   \toprule
@@ -1979,15 +2333,13 @@ blättert ihr wie im Tragwerksskript mit \taste{$\uparrow$} und \taste{$\downarr
   \midrule \endhead
   Schub: Kombination massiv und dünnwandig & Für gemischte Querschnitte gibt es keine TM2-Formel \\
   Schub: Hauptachsen nicht parallel (massiv) & $\tau = QS/(Ib)$ gilt nur bei $I_{yz} = 0$ \\
-  Schub: nur für gerade dünnwandige Elemente & Dünnwandige Kreise und Bögen sind nicht im
-    Profilgraph \\
   Schub: mehrzelliges Profil & Statisch unbestimmt \\
   Warnung: Querkraft quer zur Symmetrieachse & $q_0$ kommt aus der Verträglichkeit, $S$ und
-    $\tau$ sind trotzdem richtig; die Meldung nennt die erkannten Achsen \\
+    $\tau$ sind trotzdem richtig. Die Meldung nennt die erkannten Achsen \\
   Warnung: Geschlossene Zelle ohne erkannte Symmetrie & $q_0$ aus der Verträglichkeit, $S$ und
     $\tau$ trotzdem richtig \\
   Warnung: $S$ bzw.\ $\tau$ in der Richtung ohne Symmetrieachse & Dort kam $q_0$ aus der
-    Verträglichkeit; der Verlauf ist trotzdem richtig \\
+    Verträglichkeit. Der Verlauf ist trotzdem richtig \\
   Verwölbung nicht berechnet & Massiv, gemischt, mehrzellig, $I_T = 0$ oder Schubmittelpunkt
     unbestimmt \\
   Warnung: Offenes Profil, nicht in der Formelsammlung & $u_x = -\vartheta\int r\,ds + c$ ist
@@ -1995,25 +2347,28 @@ blättert ihr wie im Tragwerksskript mit \taste{$\uparrow$} und \taste{$\downarr
   Schub: Trägheitsmomente singulär & $I_yI_z - I_{yz}^2 \approx 0$ \\
   Hinweis: Hauptachsen nicht parallel, $I_{yz}$-Kopplung & Schiefe Biegung, siehe oben \\
   Torsion: nur rein dünnwandige Profile & Keine Prandtl-Lösung \\
-  Torsion: mehrzelliges Profil & Statisch unbestimmt \\
+  Torsion: mehrzelliges Profil & Nicht eingebaut: Mehrzellige Profile sind statisch
+    unbestimmt, dafür bräuchte es je Zelle eine eigene Verträglichkeitsbedingung \\
   Torsion: $I_T = 0$ & Kein Torsionswiderstand \\
-  Torsion mit Kreisen/Bögen & Nur ein einzelnes Kreisrohr oder freie Bögen; angeschlossene Bögen
-    können eine Zelle schließen \\
-  Torsion aus Kräften: Schubmittelpunkt statisch unbestimmt & Das Moment ist nicht bestimmbar \\
+  Torsion aus Kräften: Schubmittelpunkt nicht bestimmbar (Grund) & Ohne Schubmittelpunkt
+    gibt es kein Moment um ihn. Der Grund steht dahinter, meist mehrzelliges Profil \\
+  Ungültige Eingabe für den Winkel $\varphi$ & Beim gedrehten System, der Ausdruck ließ sich nicht
+    auswerten \\
   $\sigma_x$ nicht berechenbar (Nenner 0) & Fläche oder $I_yI_z - I_{yz}^2$ ist null \\
   Ungültige Eingabe & Der Ausdruck ließ sich nicht auswerten \\
   Hinweis: Profilbeiwert $\xi = 1$, so gewollt? & Torsion eines offenen Profils mit $\xi = 1$,
     wenn Torsion offener Profiele gefragt ist steht in der Aufgabe fast immer der Beiwert sonst FOS \\
   Hinweis: alle Elemente in der Standarddicke & Kommt einmal bei \taste{e}, wenn alle dünnwandigen
-    Elemente die Standarddicke haben; erst wieder, wenn das Profil ganz gelöscht wurde \\
+    Elemente die Standarddicke haben. Erst wieder, wenn das Profil ganz gelöscht wurde \\
   Kein Querschnitt vorhanden & Es wurde noch nichts gezeichnet \\
-  A, I\_y und I\_z müssen positiv sein; $I_y I_z - I_{yz}^2$ muss positiv sein & Beim
+  A, I\_y und I\_z müssen positiv sein. $I_y I_z - I_{yz}^2$ muss positiv sein & Beim
     Überschreiben der Querschnittswerte (Optionen Seite~3) \\
   Geschlossene Zelle: die Laufvariable konnte nicht auf der Symmetrieachse beginnen & Die
     Symmetrieachse schneidet die Zelle an keiner passenden Stelle, gerechnet wird trotzdem \\
-  V gehört zur Schubspannungsansicht & \taste{v} in der Verwölbungsansicht; \taste{Esc} schließt
-    die Verwölbung \\
-  \taste{v} nur im Schubspannungsmodus & Erst Schub rechnen, dann Verlauf wählen \\
+  V wählt den Schubspannungsverlauf und geht erst nach der Schubspannungsrechnung \dots &
+    \taste{v} ohne Schubrechnung oder bei offener Verwölbungsansicht. Die Meldung nennt alle
+    Schritte: gegebenenfalls \taste{Esc} (Verwölbungsansicht schließen), \taste{b},
+    \emph{5. Schubspannung}, danach \taste{v} \\
   Wirklich alles loeschen? & Rückfrage bei \taste{c} bzw.\ \taste{ctrl}+\taste{Del}: \taste{Enter} löscht, \taste{Esc} bricht ab \\
   \bottomrule
 \end{longtable}
@@ -2025,16 +2380,13 @@ blättert ihr wie im Tragwerksskript mit \taste{$\uparrow$} und \taste{$\downarr
   \item Keine Prandtlsche Torsionsrechnung für massive Querschnitte.
   \item Keine Wölbkrafttorsion (die Verwölbung selbst schon, siehe oben), keine
         Querschnittsverformung, keine lokalen Spannungsspitzen, keine Kerbwirkung.
-  \item Dünnwandige Kreise und Bögen gehen als Mittellinie mal Dicke in die Querschnittswerte ein
-        ($A = 2\pi R t$ beim Kreis), nicht aber in die Schubrechnung; Torsion nur als Kreisrohr
-        oder freier Bogen.
   \item Numerisch addierte Elemente sind eine Rasternäherung (Warnung im Ergebnisfeld).
 \end{itemize}
 
 \section{Wie gerechnet wird}
 
 Flächen, Schwerpunkte und Flächenmomente kommen aus geschlossenen Formeln je Grundform,
-zusammengesetzt mit dem Satz von Steiner; der Schub dünnwandiger Profile aus einem Profilgraph,
+zusammengesetzt mit dem Satz von Steiner. Der Schub dünnwandiger Profile aus einem Profilgraph,
 auf dem der Schubfluss aufsummiert wird. Die Details (Gaußsche Trapezformel, $q_0$ aus Symmetrie
 oder Verträglichkeit, Schubmittelpunkt, Verwölbung, Kernfläche) stehen im letzten Teil der
 Anleitung (Teil~\ref{sec:Mathe}).
@@ -2042,9 +2394,9 @@ Anleitung (Teil~\ref{sec:Mathe}).
 %=====================================================================
 \part{Spannungskreis}
 
-\section{Die Idee: Eingabe über Schnitte}
+\section{Die Idee: Eingabe über Schnitte}\label{sec:kreis-eingabe}
 
-In \textbf{TM2} ist die Aufgabe fast nie \enquote{gegeben sind $\sigma_x$, $\sigma_y$,
+In \textbf{TM2} ist die Aufgabe selten \enquote{gegeben sind $\sigma_x$, $\sigma_y$,
 $\tau_{xy}$}, sondern \enquote{in diesem Schnitt ist $\sigma$ bekannt, in jenem $\tau$, und der
 eine Winkel ist gesucht}. Genau so gebt ihr hier ein: in einer Tabelle, deren \textbf{Spalten die
 Schnitte} sind und deren Zeilen
@@ -2090,10 +2442,10 @@ $\sigma_x$, $\sigma_y$ und $\tau_{xy}$. Gibt es zwei mögliche Zustände, stehen
   \textbf{Taste} & \textbf{Wirkung} \\
   \midrule \endhead
   Pfeiltasten & Tabelle: Zelle wählen (links/rechts der Schnitt, oben/unten $\alpha$, $\sigma$,
-    $\tau$); Kreis: Marke bewegen (links/rechts der Schnitt, oben/unten $5^\circ$) \\
+    $\tau$). Kreis: Marke bewegen (links/rechts der Schnitt, oben/unten $5^\circ$) \\
   Ziffer, \code{.}, \code{-} & fängt sofort eine neue Eingabe in der Zelle an \\
-  \taste{Enter} & in Scheibe und Kreis: zurück zur Tabelle; sonst Zelle zum Ändern öffnen bzw.\
-    übernehmen; danach geht es
+  \taste{Enter} & in Scheibe und Kreis: zurück zur Tabelle. Sonst Zelle zum Ändern öffnen bzw.\
+    übernehmen. Danach geht es
     $\alpha \rightarrow \sigma \rightarrow \tau \rightarrow$ nächster Schnitt \\
   \taste{Del} & beim Ändern ein Zeichen löschen, sonst die Zelle leeren (der Wert wird dann
     wieder berechnet) \\
@@ -2137,7 +2489,7 @@ $(\sigma_m, 0)$ mit Radius $R$. Die $\tau$-Achse steht dort, wo sie hingehört, 
 $\sigma = 0$. Ihr seht also ein richtiges Koordinatensystem und könnt direkt sehen, ob der
 Zustand ganz im Zug- oder Druckbereich liegt. Hauptspannungen, Mittelpunkt und Nullpunkt sind
 markiert, jeder Schnitt ist als Punkt mit Radiusstrahl eingezeichnet. Liegt der Kreis sehr weit
-vom Ursprung weg, hat der Kreis Vorrang; der Nullpunkt steht dann als gepunktete Linie am
+vom Ursprung weg, hat der Kreis Vorrang. Der Nullpunkt steht dann als gepunktete Linie am
 Bildrand. Mit den \textbf{Pfeiltasten} wandert ihr über den Kreis: links und rechts springen von
 Schnitt zu Schnitt, hoch und runter drehen in $5^\circ$-Schritten weiter. Unten stehen dabei
 immer $\alpha$, $\sigma$ und $\tau$ der Marke. So bekommt ihr auch den Zustand in einem Schnitt,
@@ -2148,7 +2500,8 @@ $2\alpha$ in die andere Richtung, und bei wachsendem $\alpha$ wandern die Punkte
 \section{Wann ist der Zustand bestimmt?}
 
 Mit $\sigma_m = \frac{\sigma_x+\sigma_y}{2}$, $R_c = \frac{\sigma_x-\sigma_y}{2}$ und
-$R_s = \tau_{xy}$ ist
+$R_s = \tau_{xy}$ ($c$ wie Kosinus, $s$ wie Sinus: $R_c$ steht vor $\cos 2\alpha$, $R_s$ vor
+$\sin 2\alpha$. Zusammen geben sie den Radius $R = \sqrt{R_c^2 + R_s^2}$) ist
 
 \[
   \sigma(\alpha) = \sigma_m + R_c\cos 2\alpha + R_s\sin 2\alpha, \qquad
@@ -2169,8 +2522,7 @@ liegt der Punkt $(\sigma, \tau)$ auf dem Kreis,
   (\sigma - \sigma_m)^2 + \tau^2 = R_c^2 + R_s^2 ,
 \]
 
-und das ist genau eine Angabe (der Winkel ist ja die zweite Unbekannte). Typischer Fall ist
-\emph{Klausur Aufgabe 5}: Hauptrichtung $x$ (eingeben als $\alpha = 0$, $\tau = 0$), dazu
+und das ist genau eine Angabe (der Winkel ist ja die zweite Unbekannte). Z.B.: Hauptrichtung $x$ (eingeben als $\alpha = 0$, $\tau = 0$), dazu
 $\sigma_y = 10$ ($\alpha = 90^\circ$) und der Schnitt $\sigma_\xi = 35$, $\tau_{\xi\eta} = 20$ ohne
 Winkel. Das Programm liefert $\sigma_I = 51$, $\sigma_{II} = 10$ und den Winkel des Schnitts,
 $-38{,}7^\circ$ (in der Tabelle als $141{,}3^\circ$, das ist dasselbe).
@@ -2196,9 +2548,9 @@ Kreis der Wert nicht passt.
 \end{longtable}
 
 mit $\varphi = \operatorname{atan2}(R_s, R_c)$. Bei zwei Lösungen steht die zweite klein hinter
-dem Winkel in der Tabelle. Mit \taste{Tab} auf diesem Feld wechselt ihr zur anderen Lösung; die
+dem Winkel in der Tabelle. Mit \taste{Tab} auf diesem Feld wechselt ihr zur anderen Lösung. Die
 berechnete Spannung des Schnitts, die Scheibe und der Kreis ziehen mit. Das braucht ihr, wenn die
-Aufgabe über eine Zusatzangabe (z.\,B.\ die Richtung der Schubspannung) festlegt, welche der beiden
+Aufgabe über eine Zusatzangabe (z.\,B.\ die Richtung der Schubspannung oder Aufgabenskitze) festlegt, welche der beiden
 Lösungen gemeint ist. Liegt euer Wert gar nicht auf dem Kreis (also
 $|\sigma - \sigma_m| > R$), sagt euch das Programm das für diesen Schnitt.
 
@@ -2208,11 +2560,11 @@ $|\sigma - \sigma_m| > R$), sagt euch das Programm das für diesen Schnitt.
   \item Schnitte ohne Winkel legen nie die \emph{Richtung} fest, nur Mittelpunkt und Radius.
         Mindestens eine Angabe mit Winkel braucht ihr immer.
   \item Eine Hauptrichtung gebt ihr als Schnitt mit diesem Winkel und $\tau = 0$ ein. Ob dort
-        $\sigma_I$ oder $\sigma_{II}$ wirkt, rechnet das Programm aus; eintragen lässt sich das nicht.
+        $\sigma_I$ oder $\sigma_{II}$ wirkt, rechnet das Programm aus. Eintragen lässt sich das nicht.
   \item Wenn ihr nur die Winkel \emph{zwischen} den Schnitten kennt: Setzt den ersten Schnitt auf
         $0^\circ$ und die anderen relativ dazu. Alle Ergebnisse sind dann auf diesen Schnitt
         bezogen, und die Hauptspannungen stimmen sowieso.
-  \item Einen Schnitt werdet ihr los, indem ihr seine drei Zellen leert; \taste{ctrl}+\taste{Del} fängt
+  \item Einen Schnitt werdet ihr los, indem ihr seine drei Zellen leert. \taste{ctrl}+\taste{Del} fängt
         komplett neu an.
   \item Nur ebener Spannungszustand, kein räumlicher.
 \end{itemize}
@@ -2257,7 +2609,7 @@ und Kreis schon.
   \taste{Enter} & Menü öffnen, Wert umschalten, Eingabe übernehmen \\
   \taste{Esc} & Box, Eingabe, Menü oder Modus schließen \\
   \taste{Del} & Zeichen in der Eingabe bzw.\ Element unter dem Zeiger löschen \\
-  Pfeiltasten & Ansicht verschieben; im Menü Zeile (hoch/runter) und Seite (links/rechts) wählen \\
+  Pfeiltasten & Ansicht verschieben. Im Menü Zeile (hoch/runter) und Seite (links/rechts) wählen \\
   \bottomrule
 \end{longtable}
 
@@ -2277,9 +2629,9 @@ und Kreis schon.
   \taste{c}, \taste{ctrl}+\taste{Del} & alles löschen (Rückfrage: \taste{Enter} löscht, \taste{Esc} bricht ab) \\
   \taste{+}, \taste{-} & Zoom \\
   \taste{Enter} & Menüpunkt wählen, Element bearbeiten, Eingabe übernehmen \\
-  \taste{Esc} & Box, Eingabe oder Ansicht schließen; ist nichts mehr offen, verwirft
+  \taste{Esc} & Box, Eingabe oder Ansicht schließen. Ist nichts mehr offen, verwirft
     \taste{Esc} alle Ergebnisse (Spannungen, Schub, Torsion, Kernfläche) \\
-  \taste{Del} & letzten Punkt bzw.\ letztes Element löschen; in Eingabemasken ein Zeichen \\
+  \taste{Del} & Element unter dem Zeiger löschen. Beim Linienzug den letzten Punkt, in Eingabemasken ein Zeichen \\
   \bottomrule
 \end{longtable}
 
@@ -2289,7 +2641,7 @@ und Kreis schon.
   \toprule
   \textbf{Taste} & \textbf{Funktion} \\
   \midrule \endhead
-  Pfeiltasten & Zelle wählen; im Kreis die Marke bewegen \\
+  Pfeiltasten & Zelle wählen. Im Kreis die Marke bewegen \\
   Ziffer, \code{.}, \code{-} & Eingabe in der Zelle beginnen \\
   \taste{b} & rechnen \\
   \taste{s}, \taste{k} & Spannungsscheibe, Mohrscher Kreis (nur bei eindeutigem Zustand) \\
@@ -2314,12 +2666,12 @@ und Kreis schon.
         Eingabe nicht.
   \item \textbf{\code{t} und \code{T} gehen nicht als Symbol}, das ist die Integrationsvariable.
         Nehmt \code{dt} oder \code{t1}.
-  \item \textbf{Griechische Buchstaben} werden nicht als Symbol erkannt; \code{a} statt $\alpha$.
+  \item \textbf{Griechische Buchstaben} werden nicht als Symbol erkannt. \code{a} statt $\alpha$.
   \item \textbf{Zahl und Symbol nicht mischen:} Wenn $EA$ symbolisch ist, sollten alle Stäbe ein
-        symbolisches $EA$ haben; sonst kommen Terme wie \code{3*l\^{}2*ea + 125000000} heraus.
+        symbolisches $EA$ haben. Sonst kommen Terme wie \code{3*l\^{}2*ea + 125000000} heraus.
   \item \textbf{Pendelstäbe brauchen Gelenke} an beiden Enden, sonst sind es Biegestäbe mit dem
         voreingestellten $EI$.
-  \item \textbf{Lager, an denen nur Stäbe mit Endgelenk hängen}, brauchen ein Knotengelenk; sonst
+  \item \textbf{Lager, an denen nur Stäbe mit Endgelenk hängen}, brauchen ein Knotengelenk. Sonst
         ist die Knotenverdrehung unbestimmt und das System gilt als kinematisch.
   \item \textbf{Gleichmäßige Erwärmung:} $T_{oben} = T_{unten} = \Delta T$ eingeben.
   \item \textbf{Ein Bereich, ein Stab:} Überall, wo ihr von Hand eine neue Biegelinie ansetzen

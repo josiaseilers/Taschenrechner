@@ -1,0 +1,86 @@
+Wie realistisch ist es, einen Ladebalken im tragwerksskript einzubauen, wenn b gedrückt wird, oder wenn wenn die exportfunktionen zum Rand lgs uns Lgs matrix aufgerufen werden?
+falls machbar gerne einbauen aber dezenter grüner balken oben.
+  -> Machbar, aber mehr als ein Balken: Lua auf dem Rechner zeichnet den Bildschirm erst neu, wenn
+     die Rechnung fertig ist. Damit der Balken wächst, muss die Rechnung in Stücken laufen. Ich packe
+     sie in eine Coroutine, der Timer setzt sie fort, und dazwischen zeichnet on.paint oben einen
+     dünnen grünen Balken. Jedes Neuzeichnen kostet etwas Zeit, deshalb unterbricht die Rechnung
+     höchstens alle 0,15 s. Tasten sind während der Rechnung gesperrt.
+     Der Haken: Lua 5.1 auf dem Rechner kann nicht innerhalb eines pcall anhalten. Die LGS-Matrix
+     (lgs_weg) läuft komplett in einem pcall, dort ersetze ich ihn durch eine innere Coroutine. Im
+     Emulator (LuaJIT) fällt so ein Fehler nicht auf, deshalb bilde ich die Einschränkung im Test nach.
+     Den Fortschritt kann das Programm bei B und beim Rand-LGS gut schätzen (Rechenläufe,
+     Superpositionsschritte, CAS-Blöcke), bei der LGS-Matrix grob (Kandidaten, Schritte).
+     Mein Vorschlag: Ich baue das als Nächstes ein, zuerst für B, dann für die beiden Exporte.
+
+
+ich hätte den balken einfach nur gerne das man bei großen berechnungen sieht das es vorran geht.
+Also z.B. wenn der autokgv solver für die statische bestimmtheit angeschmissen wird kann es schon etwas dauern,
+dass man da so eine ungefähre abschätzung bekommt wie weit die berechnung ist, das muss nicht ultra genau sein.
+
+
+Was die faltung mit der Lösung für einen Einheitssprung bedeuten soll verstehe ich nicht
+  -> Umgeschrieben: Die Streckenlast wird in viele kleine Einzellasten q(t) dt zerlegt. Eine
+     Einzellast 1 bei t gibt ab dort den Anteil (x-t)^3/6 in EI w (das c1 x^3/6 des Ansatzes, nur
+     um t verschoben). Alles ist linear, also addieren sich die Beiträge, und aus der Summe wird das
+     Integral. Der Name Faltung steht nur noch als Nebenbemerkung da. "Einheitssprung" war schief,
+     gemeint war der Sprung in Q durch eine Einzellast 1.
+
+ja das war mehr oder weniger meine frage warum man das dreifach integral durch dieses eifache integral tauschen kann
+
+
+
+
+Zum rand lgs: warum die konstanten c1 c2 und C1 bei starren stäben kraftgrößen sind und wie diese aus dem GGW bestimmt werden ist mit nicht ganz klar.
+Beim normalen stab sind diese konstanten mit den gleichen exponenten bei x wie ja dort bereits steht weggrößen.
+  -> Auch beim elastischen Stab sind c1, c2, C1 eigentlich Kraftgrößen: Q(0) = -c1, M(0) = -c2,
+     N = C1. In der Biegelinie stehen sie nur, weil die Krümmung aus dem Moment kommt, und zwar
+     immer geteilt durch EI (c1 x^3/(6 EI)). c3 und c4 sind dagegen echte Weggrößen (w'(0), w(0)).
+     Für EI gegen unendlich fällt der Beitrag von c1, c2 aus w heraus, als Schnittgrößen bleiben sie.
+     Bestimmt werden sie dann aus den Bedingungen, in denen Kräfte stehen (Gelenk, Gleichgewicht,
+     freies Ende). Im Text steht jetzt das Beispiel starrer Kragarm mit Kraft F: c3 = c4 = 0 aus der
+     Einspannung, c1 = -F und c2 = F L aus Q(L) = F und M(L) = 0, genau wie von Hand.
+
+ok du hast geschrieben c3 und c4 sind echte weggrößen, sind diese durch EI geteilt nicht die weggrößen?
+in der anleitung steht jetzt das c1 und c2 und C2 als kraftgrößen stehen bleiben, sie tauche aber in der lösung ja nie auf
+
+
+ich meinte, etwas leicht anderes, das programm hangelt sich ja ausgehden von der startscheibe durch das programm um die kinnematik zu ermitteln
+wenn in diesem Weg irgendwass mal eine scheibe sit die sich nur verschiebt geht das auf diesem weg doch ab dort nicht weiter oder?
+  -> Nein, die Kette geht weiter. Bei einer Scheibe, die sich nur verschiebt, bewegt sich jeder Punkt
+     um denselben Vektor v, also auch der Nebenpol zur nächsten Scheibe B. Damit kennt das Programm
+     die Verschiebung des Nebenpols und rechnet B genauso wie hinter einer drehenden Scheibe:
+     Hauptpol von B im Endlichen gibt phi_B, im Unendlichen verschiebt sich auch B nur. Liegt der
+     Nebenpol (A,B) selbst im Unendlichen, gilt phi_B = phi_A = 0, B verschiebt sich dann auch nur
+     oder steht still. Im Code sind das die Fälle mit stateA.type == "trans" in calcKinematicStates.
+     Steht jetzt als eigener Absatz im Verschiebungszustand.
+
+wie wird eine scheibe im system also nicht die startscheibe die sich nur verschiebt in pvv_kin dargestellt?
+
+
+
+
+mir ist bei der lgs matrix noch nicht ganz klar, warum es bei einem gelenk mit mehreren stäben aber einem biegesteifen rest keine gleichgewicht bedingung im gelenk braucht
+  -> Der Bolzen gehört dann zum biegesteifen Rest. Beispiel: Stütze läuft durch, zwei Riegel
+     hängen gelenkig daran. Die Gelenkkräfte der Riegel greifen direkt an der Stütze an und stehen
+     in ihren drei Gleichungen. Der Bolzen ist kein eigener Körper, sein Gleichgewicht steckt im
+     Gleichgewicht der Stütze. Erst wenn alle Stäbe gelenkig hängen, ist er ein eigener Körper und
+     braucht zwei Gleichungen. Beispiel steht jetzt im Text.
+
+also greifen an diesem biegesetifen rest im freischnitt dann mehr als nur 2 gelenkkräfte an also insgesammt von jedem stab
+der durch ein gelenk angreift 2?
+
+
+Wollen wir die Trägheitsmatrix evtl I nenenen, Matritzen generell mit großen Fetten buchstaben und vektoren mit kleinen fetten buchstaben bezeichnen?
+  -> Finde ich gut. Mein Vorschlag:
+     - Matrizen fett groß: K, C, T, W, R, Trägheitsmatrix I (die Einheitsmatrix kommt nicht vor).
+     - Spaltenvektoren aus der linearen Algebra fett klein: u, r, g, s, p, v, lambda, mu.
+     - Geometrische Vektoren in der Ebene (Richtungen e, n, t, Ortsvektoren r, x, Knotenverschiebung
+       U) behalten den Pfeil.
+     Offen ist der Lastvektor: nach der Regel klein (f), in vielen FEM-Skripten aber groß (K u = F).
+     Wie heißt er in eurer Formelsammlung? Sag kurz Bescheid, dann ziehe ich das im Mathe-Teil durch.
+lass uns das einfach f nenen also klein
+
+
+
+
+
